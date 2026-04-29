@@ -1,0 +1,20 @@
+[tools]
+go = "1.23"
+golangci-lint = "latest"
+gofumpt = "latest"
+
+[tasks.build]
+description = "Build the gogents application"
+run = "go build -o bin/gogents ./cmd/gogents"
+
+[tasks.test]
+description = "Run all unit tests and generate report"
+run = "go test -v ./... -coverprofile=logs/coverage.out | tee logs/unit_test_report.log && go tool cover -func=logs/coverage.out >> logs/unit_test_report.log"
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks.fmt]
+description = "Run gofumpt to format the code"
+run = "gofumpt -l -w ."
