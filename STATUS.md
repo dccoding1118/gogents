@@ -40,7 +40,10 @@
 
 ### 未觸碰（非本任務）
 
-- `docs/changes/change-remove-gemini-agent.md`（空檔，你的另一個未來任務佔位）
+- `docs/changes/change-remove-gemini-agent.md`（CH-003：移除 Gemini agent 支援）**✅ 全部完成**
+  - **文件層**：README 重整（Architecture 先於 Features）+ 全 Gemini 敘述清除；AGENTS.md、R01/R02/R06、requirement.md、D01/D02/D03/D06/design-plan、unit-tests.md 皆已清理
+  - **程式層**：刪 `internal/agent/gemini.go`；dispatcher.go 去 gemini 分支；config.go `agent.type` 校驗收斂為 `{claude}`；dispatcher_test.go / config_test.go 改為驗證「gemini 現為非法值應回錯」
+  - **驗證**：`mise run build` ok、`go test ./...` 全通過、`golangci-lint run` 0 issues；`.go` 內 `gemini` 僅剩「非法值回錯」測試案例。尚未 commit
 - 工作區既有未提交改動：`internal/agent/claude.go`、`internal/daemon/syncer_test.go`、`internal/foundation/workspace.go`（先前 session in-progress）
 
 ## 後續架構調整（依你 review 確認）

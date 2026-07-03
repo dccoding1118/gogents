@@ -1,17 +1,6 @@
 # GoGents
 
-**GoGents** is an automation daemon written in Go that bridges external task sources (GitHub Issues, or a local ticket inbox from [agent-manager](#agent-manager-integration)) with LLM-powered coding agents (Gemini CLI, Claude Code). It continuously syncs assigned tasks, dispatches them to an AI agent for execution, and reports results back to the originating source.
-
-## Features
-
-- **Pluggable Task Sources** — `github_issue` polls GitHub Issues (via `gh` CLI) by label; `local` reads an am ticket inbox (`~/.am/tickets/`) filtered by worker label. Both share one task store, state machine, and execution pipeline.
-- **Multi-Agent Support** — Pluggable agent architecture supporting both [Gemini CLI](https://github.com/google-gemini/gemini-cli) and [Claude Code](https://docs.anthropic.com/en/docs/claude-code). New agents can be added by implementing a simple interface.
-- **Automated Execution Pipeline** — For each task: fetches task content → prepares `input.md` → creates a Git branch → invokes the agent (with the **workspace root** as its working directory, so workspace-level `.claude/` and `.mcp.json` apply) → judges the result → reports back to the source.
-- **Ticket-Declared Verification** — A `local` ticket may declare a `verify` command; the daemon runs it in the workspace and uses its exit code to judge pass/fail, falling back to the `result.json` coding verdict when unspecified.
-- **Graceful Lifecycle Management** — Signal-aware daemon with startup validation (preflight checks), crash recovery (requeues interrupted tasks), and graceful shutdown.
-- **Structured Logging** — JSONL-formatted logs with Asia/Taipei timezone, split into `daemon.jsonl` (all events) and `error.jsonl` (errors only).
-- **Runtime Registration & Observability** — `start` registers the runtime into `~/.gogents/config.yaml` (keyed by workspace path); `gogents runtime list/status` and `gogents logs` expose live `runtime_state`, PID, and logs for auditing.
-- **Source Feedback** — `github_issue` updates issue comments, PR links, and `gogents:*` labels; `local` writes the terminal `status` and `result` back to the ticket file.
+**GoGents** is an automation daemon written in Go that bridges external task sources (GitHub Issues, or a local ticket inbox from [agent-manager](#agent-manager-integration)) with LLM-powered coding agents (Claude Code). It continuously syncs assigned tasks, dispatches them to an AI agent for execution, and reports results back to the originating source.
 
 ## Architecture
 
@@ -23,7 +12,7 @@
                                                                   │
                                                           ┌───────▼───────┐
                                                           │  Agent CLI    │
-                                                          │ gemini/claude │
+                                                          │    claude     │
                                                           └───────────────┘
 ```
 
@@ -34,16 +23,25 @@
 | D03    | `internal/execution`  | Task runner, result judge, input builder           |
 | D04    | `internal/logger`     | Structured JSONL logger                            |
 | D05    | `internal/source`     | Task sources (`github_issue`, `local`), feedback reporters, content fetchers, dispatcher |
-| D06    | `internal/agent`      | Gemini/Claude probe & executor adapters            |
+| D06    | `internal/agent`      | Claude probe & executor adapter                    |
+
+## Features
+
+- **Pluggable Task Sources** — `github_issue` polls GitHub Issues (via `gh` CLI) by label; `local` reads an am ticket inbox (`~/.am/tickets/`) filtered by worker label. Both share one task store, state machine, and execution pipeline.
+- **Pluggable Agent Architecture** — Agents sit behind a simple probe/executor interface. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the officially supported agent; new agents can be added by implementing the interface.
+- **Automated Execution Pipeline** — For each task: fetches task content → prepares `input.md` → creates a Git branch → invokes the agent (with the **workspace root** as its working directory, so workspace-level `.claude/` and `.mcp.json` apply) → judges the result → reports back to the source.
+- **Ticket-Declared Verification** — A `local` ticket may declare a `verify` command; the daemon runs it in the workspace and uses its exit code to judge pass/fail, falling back to the `result.json` coding verdict when unspecified.
+- **Graceful Lifecycle Management** — Signal-aware daemon with startup validation (preflight checks), crash recovery (requeues interrupted tasks), and graceful shutdown.
+- **Structured Logging** — JSONL-formatted logs with Asia/Taipei timezone, split into `daemon.jsonl` (all events) and `error.jsonl` (errors only).
+- **Runtime Registration & Observability** — `start` registers the runtime into `~/.gogents/config.yaml` (keyed by workspace path); `gogents runtime list/status` and `gogents logs` expose live `runtime_state`, PID, and logs for auditing.
+- **Source Feedback** — `github_issue` updates issue comments, PR links, and `gogents:*` labels; `local` writes the terminal `status` and `result` back to the ticket file.
 
 ## Prerequisites
 
 - **Go** 1.23+
 - **[mise](https://mise.jdx.dev/)** — Task runner & toolchain manager
 - **[gh](https://cli.github.com/)** — GitHub CLI (authenticated via `gh auth login`)
-- **Agent CLI** — At least one of:
-  - [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`gemini`)
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`)
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** (`claude`) — the coding agent CLI
 
 ## Quick Start
 
@@ -80,8 +78,8 @@ source:
     label: "gogents:queued"
   sync_interval: 30s
 agent:
-  type: "gemini"         # or "claude"
-  model: "gemini-2.5-pro"
+  type: "claude"
+  model: "claude-sonnet-5"
 ```
 
 **Local ticket source (agent-manager):**

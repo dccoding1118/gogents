@@ -132,7 +132,7 @@ graph LR
 - **Runtime**: 一組 workspace + daemon 的配對,以 `runtime_name` 識別;`start` 時以 **workspace 路徑為 key** 註冊到 `~/.gogents/config.yaml`
 - **Task**: 從任務來源衍生的一個開發工作單位(GitHub Issue 或 am ticket)
 - **Task ID**: 任務的唯一識別字串,格式依 `source.type` 決定:`github_issue` 為 `github-<issue-number>`;`local` 為 ticket 的 `id`
-- **Agent CLI**: 本機已安裝好的 coding agent 命令列工具(如 `gemini`、`claude` 等)
+- **Agent CLI**: 本機已安裝好的 coding agent 命令列工具(如 `claude` 等)
 - **Worker State**: `state.yaml` 記錄的顯式執行階段(`idle` / `executing` / `verifying` / `reporting` / `failed` / `broken`);`down` 由查詢端依 pid 不存在推得,不落檔
 - **agent-manager (am)**: 本機 Agent 運作環境的控制面(Tower);產出 ticket 交 gogents 執行,並向 gogents 查詢 runtime 狀態與日誌。am 側「worker/ticket」對應 gogents 側「runtime/task」
 - **Ticket**: am 產出的任務單,`source.type: local` 時為 gogents 的任務來源;YAML 檔置於 `~/.am/tickets/<id>.yaml`

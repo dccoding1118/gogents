@@ -103,14 +103,14 @@
 
 | 編號   | 測試對象      | 測試情境 (Scenario)                   | 預期結果 (Expected)                                                                         |
 | :----- | :------------ | :------------------------------------ | :------------------------------------------------------------------------------------------ |
-| D06-01 | AgentProbe    | CheckAgent: `gemini` 正常存在         | `exec.LookPath` 成功且 `gemini --version` 回傳 0，回傳 `nil`                                |
-| D06-02 | AgentProbe    | CheckAgent: `gemini` 未安裝           | 回傳 `AgentProbeError` 且 Stage 為 `lookup`                                                 |
-| D06-03 | AgentProbe    | CheckAgent: `gemini --version` 超時   | 10s 後回傳 `AgentProbeError` 且 Reason 為 `timeout`                                         |
+| D06-01 | AgentProbe    | CheckAgent: `claude` 正常存在         | `exec.LookPath` 成功且 `claude --version` 回傳 0，回傳 `nil`                                |
+| D06-02 | AgentProbe    | CheckAgent: `claude` 未安裝           | 回傳 `AgentProbeError` 且 Stage 為 `lookup`                                                 |
+| D06-03 | AgentProbe    | CheckAgent: `claude --version` 超時   | 10s 後回傳 `AgentProbeError` 且 Reason 為 `timeout`                                         |
 | D06-04 | AgentExecutor | Run: 正常啟動並執行                   | 子行程 cwd 為指定工作目錄，stdin/stdout/stderr 正確對應檔案且 `task.agent_invoked` 事件觸發 |
 | D06-05 | AgentExecutor | Run: 輸入檔不存在                     | 啟動失敗並記錄 `agent.spawn_failed`，回傳 `ErrAgentIO`                                      |
 | D06-06 | AgentExecutor | Run: 子行程 ExitCode 非零             | `Run` 仍回傳 `nil` error，但 `RunResult` 中的 `ExitCode` 為真實值，且記錄 Warning 日誌      |
 | D06-07 | AgentExecutor | Run: Context 取消 (Graceful Shutdown) | 被取消時子行程應結束，`RunResult` 標記 `Signaled=true` 並回傳 `ctx.Err()`                   |
-| D06-08 | Dispatcher    | NewAgentProbeFromConfig               | 根據 `agent.type` (如 `gemini`, `claude`) 傳回對應的 Probe 實作                             |
+| D06-08 | Dispatcher    | NewAgentProbeFromConfig               | 根據 `agent.type` (如 `claude`) 傳回對應的 Probe 實作                                       |
 | D06-09 | Dispatcher    | 未支援的 Agent 類型                   | 回傳 `ErrAgentUnsupportedType` 錯誤                                                         |
 | D06-10 | AgentExecutor | Run: 工作目錄為 workspace 根          | `cmd.Dir` = `RunRequest.WorkDir` (workspace 根)；不 chdir daemon 行程                        |
 

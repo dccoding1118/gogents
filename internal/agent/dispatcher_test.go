@@ -26,10 +26,10 @@ func TestNewAgentProbeFromConfig(t *testing.T) {
 		agentType string
 		wantErr   error
 	}{
-		// D06-08: gemini returns a probe.
-		{name: "gemini", agentType: "gemini", wantErr: nil},
 		// D06-08: claude returns a probe.
 		{name: "claude", agentType: "claude", wantErr: nil},
+		// D06-09: gemini is no longer supported.
+		{name: "gemini", agentType: "gemini", wantErr: ErrAgentUnsupportedType},
 		// D06-09: unsupported type returns ErrAgentUnsupportedType.
 		{name: "unsupported", agentType: "gpt4", wantErr: ErrAgentUnsupportedType},
 		// D06-09: empty type returns ErrAgentUnsupportedType.
@@ -70,10 +70,10 @@ func TestNewAgentExecutorFromConfig(t *testing.T) {
 		agentType string
 		wantErr   error
 	}{
-		// D06-08b: gemini returns an executor.
-		{name: "gemini", agentType: "gemini", wantErr: nil},
 		// D06-08b: claude returns an executor.
 		{name: "claude", agentType: "claude", wantErr: nil},
+		// D06-09b: gemini is no longer supported.
+		{name: "gemini", agentType: "gemini", wantErr: ErrAgentUnsupportedType},
 		// D06-09b: unsupported type returns ErrAgentUnsupportedType.
 		{name: "unsupported", agentType: "unknown_agent", wantErr: ErrAgentUnsupportedType},
 	}

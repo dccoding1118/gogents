@@ -5,7 +5,7 @@
 ## 1. 專案概覽 (Project Overview)
 `gogents` 是一個基於 Go 語言開發的自動化系統，其核心工作流為：
 1. **Sync**: 從外部 Task Source 同步指派任務。來源型別由 `source.type` 決定：`github_issue` (GitHub Issue) 或 `local` (本地 `~/.am/tickets/` ticket inbox，對接 agent-manager)。
-2. **Execute**: 根據任務定義，呼叫 LLM Agent (Gemini/Claude) 在本地工作區執行任務 (agent 工作目錄為 workspace 根，使 workspace 級 `.claude/`、`.mcp.json` 生效)。
+2. **Execute**: 根據任務定義，呼叫 LLM Agent (Claude Code) 在本地工作區執行任務 (agent 工作目錄為 workspace 根，使 workspace 級 `.claude/`、`.mcp.json` 生效)。
 3. **Verify & Report**: 執行完成後，依 ticket 宣告的 `verify` (或 fallback `result.json`) 判定成敗，將結果與日誌回傳至來源 (GitHub 留言 / 回寫 ticket 檔)。
 
 作為 agent-manager (am) 的執行面：am 派工到 `~/.am/tickets/`，gogents worker daemon 依 label 認領執行、回寫終態；am 經 `gogents runtime status` / `gogents logs` 查詢執行狀態 (單向 `am → gogents`)。
@@ -26,8 +26,8 @@
     - `daemon.go`: 主程序生命週期控制。
     - `syncer.go`: 處理定時從外部 Source 同步任務的邏輯。
 - `internal/agent/`: LLM Agent 適配器。
-    - `dispatcher.go`: 根據配置挑選適當的 Agent (如 Gemini 或 Claude)。
-    - `gemini.go`, `claude.go`: 具體的 Agent 實現。
+    - `dispatcher.go`: 依 `agent.type` 選出對應的 Agent 實作。
+    - `claude.go`: 具體的 Agent 實現。
 - `internal/source/`: 外部任務來源適配器 (TaskSource / SourceProbe / ContentFetcher / FeedbackReporter)。
     - `github.go`: `github_issue` 實作，透過 `gh` CLI 存取 Issues。
     - `local*.go`: `local` 實作，讀 `~/.am/tickets/` ticket inbox、依 label 認領、回寫終態。

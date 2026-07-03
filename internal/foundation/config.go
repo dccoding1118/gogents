@@ -174,7 +174,7 @@ func validateConfigSchema(cfg *Config) error {
 
 	// agent.type enum.
 	switch cfg.Agent.Type {
-	case "gemini", "claude":
+	case "claude":
 	default:
 		return fmt.Errorf("%w: unsupported agent.type: %q", ErrConfigSchema, cfg.Agent.Type)
 	}

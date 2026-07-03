@@ -2,7 +2,7 @@
 
 涵蓋需求：R06（任務執行流程，支援面）。
 
-本模組是 `cfg.agent.type` 的**適配層**：對外提供抽象的 `AgentProbe`（介面由 D01 擁有）與 `AgentExecutor`（介面本模組擁有），對下封裝具體 agent CLI 的子行程執行。目前支援的 concrete strategies 為 Gemini 與 Claude Code；依 `cfg.agent.type` 選擇 concrete 的 dispatcher 由本模組內部提供（§4.4）。其他模組**一律不直接呼叫 agent CLI**，也不需認識 `gemini` 或 `claude` 特有參數。
+本模組是 `cfg.agent.type` 的**適配層**：對外提供抽象的 `AgentProbe`（介面由 D01 擁有）與 `AgentExecutor`（介面本模組擁有），對下封裝具體 agent CLI 的子行程執行。目前支援的 concrete strategy 為 Claude Code；依 `cfg.agent.type` 選擇 concrete 的 dispatcher 由本模組內部提供（§4.4）。其他模組**一律不直接呼叫 agent CLI**，也不需認識 `claude` 特有參數。
 
 ## 1. 模組架構與周邊模組關聯
 
@@ -26,7 +26,6 @@ graph LR
     D06[D06 agent-runner]
     AP{{AgentProbe<br/>由 D01 擁有}}
     AE{{AgentExecutor<br/>由 D06 擁有}}
-    GEM[[gemini CLI 子行程]]
     CLD[[claude CLI 子行程]]
     FS[(input.md / output.jsonl)]
 
@@ -36,33 +35,28 @@ graph LR
     D06 -. provides .-> AE
     D06 --> D01
     D06 --> D04
-    D06 --> GEM
     D06 --> CLD
-    GEM --> FS
     CLD --> FS
 ```
 
 ### 1.1 Stage 範圍邊界（本模組跨 Stage 2 與 Stage 3）
 
-本模組公開面分兩批實作。**Stage 2** 僅到 probe：驗證 agent CLI 可被 daemon 啟動。**Stage 3** 才補上真正拉起 agent 的 `AgentExecutor` 與 Gemini 具體實作。在 Stage 2 完成前**不得預先實作** `AgentExecutor`，避免 D03 尚未定案時誤鎖介面形狀（R06 Step 5 的 stdin / stdout 導向、事件 schema 需等 R06 / R07 對齊後才穩定）。
+本模組公開面分兩批實作。**Stage 2** 僅到 probe：驗證 agent CLI 可被 daemon 啟動。**Stage 3** 才補上真正拉起 agent 的 `AgentExecutor` 與 Claude 具體實作。在 Stage 2 完成前**不得預先實作** `AgentExecutor`，避免 D03 尚未定案時誤鎖介面形狀（R06 Step 5 的 stdin / stdout 導向、事件 schema 需等 R06 / R07 對齊後才穩定）。
 
 | 子能力                                        | Stage 2                        | Stage 3       | 留存方式                                         |
 | --------------------------------------------- | ------------------------------ | ------------- | ------------------------------------------------ |
 | `AgentProbe.CheckAgent`                       | ✔（§2 B1）                     | —             | 由 D02 啟動序列驗收                              |
 | `AgentExecutor.Run`                           | **不做**（Stage 3 才有消費端） | ✔（§2 B2–B5） | 本文件 §4.2、§5.2 給完整契約，實作順延至 Stage 3 |
-| Gemini concrete（`gemini.NewGeminiProbe`）    | ✔                              | —             | §4.3                                             |
-| Gemini concrete（`gemini.NewGeminiExecutor`） | **不做**                       | ✔             | §4.3                                             |
-| Claude concrete（`claude.NewClaudeProbe`）    | ✔                              | —             | §4.5                                             |
-| Claude concrete（`claude.NewClaudeExecutor`） | **不做**                       | ✔             | §4.5                                             |
+| Claude concrete（`claude.NewClaudeProbe`）    | ✔                              | —             | §4.3                                             |
+| Claude concrete（`claude.NewClaudeExecutor`） | **不做**                       | ✔             | §4.3                                             |
 | Dispatcher `NewAgentProbeFromConfig`          | ✔                              | —             | §4.4                                             |
 | Dispatcher `NewAgentExecutorFromConfig`       | **不做**                       | ✔             | §4.4                                             |
 
-**紀律**：Stage 2 驗收腳本只觀察 probe 行為；若實作者「順手」接上 `Run` 以便手動試跑 gemini，會造成介面與日誌事件契約在 D03 正式設計前被先定型——禁止。
+**紀律**：Stage 2 驗收腳本只觀察 probe 行為；若實作者「順手」接上 `Run` 以便手動試跑 claude，會造成介面與日誌事件契約在 D03 正式設計前被先定型——禁止。
 
 ## 2. 行為契約
 
 - **B1 AgentProbe.CheckAgent**（Stage 2）：依 `AgentSpec.Type` 選 concrete probe；
-  - `gemini`：依序檢查 (a) `gemini` 在 PATH 中可執行、(b) `gemini --version` exit 0。
   - `claude`：依序檢查 (a) `claude` 在 PATH 中可執行、(b) `claude --version` exit 0。
   任一失敗回永久錯誤並附人話 reason。10 秒 timeout。**不檢查 model 名稱可用性**。
 - **B2 AgentExecutor.Run — 工作目錄**（Stage 3）：子行程的 cwd 設為 `req.WorkDir`（由 D03 傳入 **workspace 根 `<workspace>/`**，使 workspace 級 `.claude/`、`.mcp.json` 生效；repo 為其 `./<reponame>` 子目錄）；本模組**不自行決定路徑**、不 `chdir` daemon 行程、不影響 daemon。
@@ -74,7 +68,7 @@ graph LR
 - **B4 AgentExecutor.Run — 等待**（Stage 3）：同步等待子行程結束，**不設 timeout**、不主動 kill。呼叫端（D03）透過 `ctx` 取消；ctx 取消時本模組對子行程送 `SIGTERM`、再等子行程退出後回 `ctx.Err()`。
 - **B5 AgentExecutor.Run — 回傳**（Stage 3）：回 `RunResult{ExitCode, StartedAt, FinishedAt, DurationMs}`；exit code 原封帶回，**不**依 exit 值改寫為 error。呼叫端依 exit + `result.json` 判定任務成敗（R06 / R07）。只有**無法 spawn**（ENOENT、permission denied）才回 error（`ErrAgentSpawn`）。
 - **B6 不做的事**：不讀 `input.md` 內容、不解析 `output.jsonl`、不讀 `result.json`、不改 `task.yaml`、不做 git 操作、不做重試（agent 執行屬一次性動作，失敗由 D03 計 `failure_count` + 下次 sync 重排）。
-- **B7 身份**：子行程以 daemon 使用者身份執行；不 sudo、不切換 UID；token / API key 由 agent CLI 自身環境（例：`~/.gemini/`、`GEMINI_API_KEY`）管理，本模組不讀取、不傳遞。
+- **B7 身份**：子行程以 daemon 使用者身份執行；不 sudo、不切換 UID；token / API key 由 agent CLI 自身環境（例：`~/.claude/`、`ANTHROPIC_API_KEY`）管理，本模組不讀取、不傳遞。
 
 ## 3. 資料結構
 
@@ -82,20 +76,18 @@ graph LR
 
 | 欄位    | 型別   | 說明                                                |
 | ------- | ------ | --------------------------------------------------- |
-| `Type`  | string | `cfg.agent.type`（合法值：`gemini` / `claude`）     |
+| `Type`  | string | `cfg.agent.type`（合法值：`claude`）                |
 | `Model` | string | `cfg.agent.model`（probe 不使用；Stage 3 Run 使用） |
 
-### 3.2 `gemini` 子指令組裝（Stage 3）
+### 3.2 `claude` 子指令組裝（Stage 3）
 
 | 行為         | 指令（示意）                                                                                    |
 | ------------ | ----------------------------------------------------------------------------------------------- |
-| Gemini probe | `gemini --version`                                                                              |
-| Gemini run   | `gemini -m <model> --yolo -o stream-json`                                                       |
 | Claude probe | `claude --version`                                                                              |
-| Claude run   | `claude -p <prompt> --model <model> --dangerously-skip-permissions --output-format=stream-json` |
+| Claude run   | `claude -p --model <model> --dangerously-skip-permissions --output-format=stream-json`          |
 
 註 1：實際 flag 名稱與順序由實作階段依具體 CLI 版本決定。
-註 2：Claude Code 採用 `-p` (print) 模式達成非互動式執行，並以 `--dangerously-skip-permissions` 達成 YOLO 自動確認模式。
+註 2：Claude Code 採用 `-p` (print) 模式達成非互動式執行（prompt 由 stdin 帶入），並以 `--dangerously-skip-permissions` 達成 YOLO 自動確認模式。
 
 ### 3.3 事件命名（發至 D04）
 
@@ -123,21 +115,21 @@ Stage 2 的 probe 成功**不發** info 事件（covered by `config.preflight_ok
 
 `AgentProbe` 由 D01 擁有（見 D01 §4），本文件不重複定義，僅提供符合該介面的 concrete 構造函式與 dispatcher。`AgentExecutor` 由本模組擁有。
 
-### 4.1 Constructor（Gemini concrete，Stage 2）
+### 4.1 Constructor（Claude concrete，Stage 2）
 
-構造函式冠 `Gemini` 前綴，明示這是 `cfg.agent.type == "gemini"` 的實例化點。呼叫端為 §4.4 dispatcher；本函式**不檢查 `cfg.Agent.Type`**（型別校驗屬 dispatcher 責任）。
+構造函式冠 `Claude` 前綴，明示這是 `cfg.agent.type == "claude"` 的實例化點。呼叫端為 §4.4 dispatcher；本函式**不檢查 `cfg.Agent.Type`**（型別校驗屬 dispatcher 責任）。
 
 ```go
-// NewGeminiProbe 回傳符合 D01.foundation.AgentProbe 介面的 Gemini 實作。
-// 由 dispatcher 在 D02 啟動時（cfg.Agent.Type == "gemini"）產出，注入 D01.Preflight。
-func NewGeminiProbe(lg logger.Logger) foundation.AgentProbe
+// NewClaudeProbe 回傳符合 D01.foundation.AgentProbe 介面的 Claude 實作。
+// 由 dispatcher 在 D02 啟動時（cfg.Agent.Type == "claude"）產出，注入 D01.Preflight。
+func NewClaudeProbe(lg logger.Logger) foundation.AgentProbe
 ```
 
 ### 4.2 `AgentExecutor` 介面與型別（Stage 3）
 
 ```go
 // AgentExecutor 將 input.md 餵給 agent CLI、收集 stdout 到 output.jsonl、回傳執行結果。
-// 介面本身與 agent 廠商解耦；Gemini 僅是 Phase 1 的 concrete 實作。
+// 介面本身與 agent 廠商解耦；Claude Code 是目前唯一的 concrete 實作。
 type AgentExecutor interface {
     Run(ctx context.Context, req RunRequest) (RunResult, error)
 }
@@ -172,13 +164,14 @@ var (
 - **Exit code 不等同 error**：`Run` 對 exit≠0 仍回 `nil` error；`failure_count` 計數與 task status 判定屬 D03 的 R07 邏輯，不宜在本模組預判。
 - **無 `Kill` / `Pid` 對外暴露**：外部不應干涉 agent 生命週期；取消透過 `ctx` 表達，已足夠 R04 B4 的 graceful shutdown 需求。
 
-### 4.3 Gemini concrete（Stage 3）
+### 4.3 Claude concrete（Stage 3）
 
 ```go
-// NewGeminiExecutor 回傳符合 AgentExecutor 介面的 Gemini 實作。
-// cfg 僅讀 Agent.Model（Model 亦可由 RunRequest.Model 覆寫；Phase 1 兩者恆等）。
+// NewClaudeExecutor 回傳符合 AgentExecutor 介面的 Claude 實作。
+// cfg 僅讀 Agent.Model（Model 亦可由 RunRequest.Model 覆寫；兩者恆等）。
+// 其 Run 核心邏輯為呼叫 claude -p（print 非互動模式）並帶入組裝好的參數。
 // Stage 2 本函式不存在（避免開發者誤呼叫到尚未實作的路徑）。
-func NewGeminiExecutor(cfg foundation.Config, lg logger.Logger) AgentExecutor
+func NewClaudeExecutor(cfg foundation.Config, lg logger.Logger) AgentExecutor
 ```
 
 ### 4.4 Dispatcher（本模組內部）
@@ -201,33 +194,25 @@ func NewAgentExecutorFromConfig(cfg foundation.Config, lg logger.Logger) (AgentE
 
 | `cfg.Agent.Type` | AgentProbe                  | AgentExecutor                       |
 | ---------------- | --------------------------- | ----------------------------------- |
-| `gemini`         | `gemini.NewGeminiProbe(lg)` | `gemini.NewGeminiExecutor(cfg, lg)` |
 | `claude`         | `claude.NewClaudeProbe(lg)` | `claude.NewClaudeExecutor(cfg, lg)` |
 | 其他             | `ErrAgentUnsupportedType`   | `ErrAgentUnsupportedType`           |
 
 **邊界紀律**
 
 - Dispatcher **不檢查** agent CLI 存在性、**不讀取** 環境變數——僅純粹依 `cfg.Agent.Type` 分流。
-- Concrete（`gemini` 子包）**不得** 包含 dispatcher 邏輯：不 `switch cfg.Agent.Type`、不驗型別正確性。
+- Concrete（`claude` 子包）**不得** 包含 dispatcher 邏輯：不 `switch cfg.Agent.Type`、不驗型別正確性。
 - `cfg.Agent.Type` 合法值集合由 D01 schema validate 先擋下。
-- 新增 agent type 的流程：(1) 新增 concrete 子包（例：`claude/`）並實作 `AgentProbe` / `AgentExecutor`；(2) 在本節兩個 factory 的 `switch` 各加一個 case。**D03 / D02 / 既有 concrete 皆不改**（OCP）。
-
-## 4.5 Claude concrete（Stage 3 預留）
-
-```go
-// NewClaudeProbe / NewClaudeExecutor 之語法結構比照 Gemini。
-// 其 Run 核心邏輯為呼叫 claude -p 並帶入組裝好的參數。
-```
+- 新增 agent type 的流程：(1) 新增 concrete 子包並實作 `AgentProbe` / `AgentExecutor`；(2) 在本節兩個 factory 的 `switch` 各加一個 case。**D03 / D02 / 既有 concrete 皆不改**（OCP）。
 
 ## 5. 程式資料流
 
-### 5.1 AgentProbe.CheckAgent（Stage 2，Gemini 實作）
+### 5.1 AgentProbe.CheckAgent（Stage 2，Claude 實作）
 
 ```
 CheckAgent(spec AgentSpec):
   steps := [
-    lookup  : exec.LookPath("gemini")
-    version : exec.Command("gemini", "--version"), timeout=10s
+    lookup  : exec.LookPath("claude")
+    version : exec.Command("claude", "--version"), timeout=10s
   ]
   for s in steps:
     err := s.Run()
@@ -236,9 +221,9 @@ CheckAgent(spec AgentSpec):
   return nil
 ```
 
-啟動期探測**不套用重試**：若第一次失敗即回錯，由 D02 拒啟、使用者看到明確 reason 後修復（例如 `gemini: command not found` → 指示使用者安裝 gemini CLI）。
+啟動期探測**不套用重試**：若第一次失敗即回錯，由 D02 拒啟、使用者看到明確 reason 後修復（例如 `claude: command not found` → 指示使用者安裝 claude CLI）。
 
-### 5.2 AgentExecutor.Run（Stage 3，Gemini 實作）
+### 5.2 AgentExecutor.Run（Stage 3，Claude 實作）
 
 ```
 Run(ctx, req):
@@ -253,8 +238,11 @@ Run(ctx, req):
   if err != nil: return RunResult{}, ErrAgentIO
   defer out.Close()
 
-  // 2. 組 cmd
-  cmd := exec.CommandContext(ctx, "gemini", "-m", req.Model) // --yolo -o stream-json
+  // 2. 組 cmd（-p print 非互動模式；prompt 由 stdin 帶入）
+  cmd := exec.CommandContext(ctx, "claude", "-p",
+           "--model", req.Model,
+           "--dangerously-skip-permissions",
+           "--output-format", "stream-json")
   cmd.Dir    = req.WorkDir
   cmd.Stdin  = stdin
   cmd.Stdout = out
@@ -262,11 +250,11 @@ Run(ctx, req):
 
   // 3. Start → 發事件
   if err := cmd.Start(); err != nil:
-    emit error "agent.spawn_failed" { task_id, agent_type: "gemini", reason: classify(err) }
+    emit error "agent.spawn_failed" { task_id, agent_type: "claude", reason: classify(err) }
     return RunResult{}, ErrAgentSpawn
 
   emit info "task.agent_invoked" {
-    task_id, agent_type: "gemini", model: req.Model,
+    task_id, agent_type: "claude", model: req.Model,
     pid: cmd.Process.Pid, work_dir: req.WorkDir,
   }
 
@@ -308,9 +296,9 @@ Run(ctx, req):
 
 | 情境                                       | 分類           | 錯誤                                               | 處理                                                |
 | ------------------------------------------ | -------------- | -------------------------------------------------- | --------------------------------------------------- |
-| `exec.LookPath("gemini")` 回 `ErrNotFound` | 永久（啟動期） | `AgentProbeError{Stage: lookup}`                   | Preflight 回錯；D02 exit 4；訊息提示安裝 gemini CLI |
-| `gemini --version` exit ≠ 0                | 永久（啟動期） | `AgentProbeError{Stage: version}`                  | 同上；訊息含 stderr 前 512 B                        |
-| `gemini --version` 10s 內未返回            | 永久（啟動期） | `AgentProbeError{Stage: version, Reason: timeout}` | 同上；視為環境異常                                  |
+| `exec.LookPath("claude")` 回 `ErrNotFound` | 永久（啟動期） | `AgentProbeError{Stage: lookup}`                   | Preflight 回錯；D02 exit 4；訊息提示安裝 claude CLI |
+| `claude --version` exit ≠ 0                | 永久（啟動期） | `AgentProbeError{Stage: version}`                  | 同上；訊息含 stderr 前 512 B                        |
+| `claude --version` 10s 內未返回            | 永久（啟動期） | `AgentProbeError{Stage: version, Reason: timeout}` | 同上；視為環境異常                                  |
 | dispatcher 收到未知 `cfg.agent.type`       | 程式錯誤       | `ErrAgentUnsupportedType`                          | 由 D01 schema 先擋下；此分支為防禦性回錯            |
 
 ### 6.2 Stage 3（執行）
@@ -335,20 +323,20 @@ Run(ctx, req):
 
 本模組屬 **基礎建設 library**（封裝 agent CLI 子行程），**無獨立可執行產出**。正確性由上游端到端驗收覆蓋：
 
-- **Stage 2 範圍**（`AgentProbe`）：由 **D02 Stage 2 驗收腳本** 覆蓋——對真實 workspace 執行 `gogents start`，觀察 daemon 啟動探測行為（含破壞情境：卸載 gemini / 改 PATH）。
+- **Stage 2 範圍**（`AgentProbe`）：由 **D02 Stage 2 驗收腳本** 覆蓋——對真實 workspace 執行 `gogents start`，觀察 daemon 啟動探測行為（含破壞情境：卸載 claude / 改 PATH）。
 - **Stage 3 範圍**（`AgentExecutor`）：由 **D03 Stage 3 驗收腳本** 覆蓋——端到端從開 issue 到 agent 跑完 → 觀察 `output.jsonl` 被 truncate 寫入、`task.agent_invoked` / `task.agent_exited` 事件成對出現、exit code 正確反映 agent 結果。
 
 ### 7.1 驗收責任對應表
 
 | D06 契約 / 行為          | 由哪個模組的驗收覆蓋 | 預期觀察點                                                                                                                                                                                                                                |
 | ------------------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| B1 AgentProbe.CheckAgent | D02 Stage 2          | 正常：`config.preflight_ok`；卸載 gemini / PATH 移除 → `config.preflight_failed` {stage=agent, reason=lookup}；故意讓 `gemini --version` 失敗（chmod -x）→ {stage=agent, reason=version}                                                  |
+| B1 AgentProbe.CheckAgent | D02 Stage 2          | 正常：`config.preflight_ok`；卸載 claude / PATH 移除 → `config.preflight_failed` {stage=agent, reason=lookup}；故意讓 `claude --version` 失敗（chmod -x）→ {stage=agent, reason=version}                                                  |
 | B2 工作目錄              | D03 Stage 3          | agent 於 **workspace 根 `<workspace>/`** 下執行、可讀到 workspace 級 `.claude/` / `.mcp.json`，並於 `./<reponame>` 子目錄操作 git（可由 agent 的 `pwd` / `git status` 自檢訊號在 output.jsonl 中觀察）                                    |
 | B3 I/O 接線              | D03 Stage 3          | 每次執行 `output.jsonl` 被 truncate（先人工塞 garbage → 執行後該 garbage 消失）；agent 看到的 stdin 與 `input.md` bytes 一致                                                                                                              |
 | B4 不設 timeout          | D03 Stage 3          | 長時間 agent 執行不被本模組主動中止；daemon 送 SIGTERM 後才收尾（signaled=true）                                                                                                                                                          |
 | B5 回傳語意              | D03 Stage 3          | agent exit 0 → `task.agent_exited` info、無 error；agent 人工 exit 1 → warning、exit_code=1、**Run 仍回 nil error**（由 D03 決定是否轉 failed）                                                                                           |
 | B6 不做的事              | 全模組               | `task.yaml` / `result.json` 在 Run 期間不被 D06 修改（可用 inotify / mtime 觀察）                                                                                                                                                         |
-| Dispatcher（§4.4）       | D02 Stage 2          | 將 `runtime.yaml` `agent.type` 改為未知值（例：`claude`）→ D01 schema 階段即擋下（先於 dispatcher）；將 `agent.type` 合法但 concrete 未註冊的偽情境 → dispatcher 回 `ErrAgentUnsupportedType`、exit 3（此情境需實作時以測試用 type 觸發） |
+| Dispatcher（§4.4）       | D02 Stage 2          | 將 `runtime.yaml` `agent.type` 改為未知值（例：`foobar`）→ D01 schema 階段即擋下（先於 dispatcher）；將 `agent.type` 合法但 concrete 未註冊的偽情境 → dispatcher 回 `ErrAgentUnsupportedType`、exit 3（此情境需實作時以測試用 type 觸發） |
 
 ### 7.2 可觀測訊號（供上游驗收腳本 grep）
 
@@ -366,6 +354,6 @@ agent.spawn_failed     (刻意破壞 input.md / output dir 權限時出現)
 
 ### 7.3 通過條件
 
-- **Stage 2**：D02 Stage 2 驗收腳本全部通過；`daemon.jsonl` 在破壞 gemini 安裝的情境下能 grep 到 `config.preflight_failed` 且 `stage=agent`；正常路徑下 `agent.*` / `task.agent_*` **不出現**（Stage 2 不執行 agent）。
+- **Stage 2**：D02 Stage 2 驗收腳本全部通過；`daemon.jsonl` 在破壞 claude 安裝的情境下能 grep 到 `config.preflight_failed` 且 `stage=agent`；正常路徑下 `agent.*` / `task.agent_*` **不出現**（Stage 2 不執行 agent）。
 - **Stage 3**：D03 Stage 3 驗收腳本全部通過；每個任務於 `daemon.jsonl` 均出現成對 `task.agent_invoked` / `task.agent_exited`；`output.jsonl` 於每次執行開頭被清空（可用「先塞 canary 字串 → 執行後消失」驗證）；daemon 於 agent 執行中送 SIGTERM，agent 被 kill 後 `task.agent_exited` 含 `signaled=true`，daemon 正常寫 `daemon.stopped` 後退出。
 - 任何階段：本模組**不**自行發 info 事件於正常路徑（除 `task.agent_invoked` / `task.agent_exited`）；驗收時若日誌出現未列於 §3.3 的 `agent.*` 事件名稱，視為實作漂移。
