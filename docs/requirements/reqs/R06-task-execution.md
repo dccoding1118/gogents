@@ -132,7 +132,7 @@ Git 操作失敗:task 轉為 `failed`,`failure_count` +1,寫入 error 日誌,跳
 
 ## Step 5:呼叫 agent CLI
 
-由 agent executor 依 `agent.type` 決定實際呼叫方式。目前版本實作 `gemini` 與 `claude`,executor 內部負責:
+由 agent executor 依 `agent.type` 決定實際呼叫方式。目前版本實作 `claude`,executor 內部負責:
 
 - 工作目錄設為 **workspace 根** `<workspace>/`,repo 以子目錄 `./<reponame>` 提供給 agent
 - 將 input.md 的內容透過 stdin 傳給 agent CLI

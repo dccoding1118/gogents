@@ -12,7 +12,7 @@ daemon-sync 不自行操作任何設定檔或 task 原子寫入；那是 D01 的
   - **D04 logger**：所有 `daemon.*`、`sync.*` 事件的唯一出口。
   - **TaskSource 抽象介面（本模組定義，§4.3）**：Syncer 只認識抽象任務來源，不直接認識 GitHub / Issue / gh CLI。具體實作（GitHub Issue 版本）由 D05 提供並在啟動時注入。
   - **D05 github-client**：提供 `TaskSource` 的 GitHub Issue 實作；提供 `SourceProbe` 注入 D01.Preflight；內部封裝 `gh` CLI 呼叫、`--json` 欄位映射、404 / auth / transient 錯誤分類。
-  - **D06 agent-runner**：提供 `AgentProbe` 注入 D01.Preflight（Stage 2 僅檢查 CLI 可用性，例如 `gemini --version` 或 `claude --version`）。
+  - **D06 agent-runner**：提供 `AgentProbe` 注入 D01.Preflight（Stage 2 僅檢查 CLI 可用性，例如 `claude --version`）。
 - **被依賴**：**D03 task-execution** 被主迴圈在每個 tick 觸發；D02 不了解 D03 內部，只透過 `TaskExecutor` 介面呼叫。
 - **I/O 邊界**：`<workspace>/.gogents/state.yaml`、`<workspace>/<reponame>/`（git clone / fetch 目標）、OS signal（SIGTERM / SIGINT）。所有任務來源 I/O 都被封裝在 TaskSource 之後，D02 自身不呼叫 `gh` 等外部 CLI。
 
@@ -51,7 +51,7 @@ graph LR
 | **D04 logger**                                         | 全量（Stage 2 的可觀測性基礎）。                                                                                                                                                       | —                                                                                                                         | 直接呼叫                                                           |
 | **TaskSource 介面與 dispatcher**                       | 介面由 **本文件 §4.3 定義**（含 `List` / `Get` / `Kind`、抽象錯誤 `ErrSourceNotFound` / `ErrSourceAuth` / `ErrSourceTransient`）；dispatcher 與 concrete 分工由 **本文件 §4.4 定義**。 | 未來新增來源（如 Jira）：新增 concrete strategy 設計文件 + §4.4 dispatcher `switch` 加 case，介面與既有 concrete 皆不改。 | 本文件 §4.3、§4.4                                                  |
 | **D05 github-client（TaskSource 實作 + SourceProbe）** | GitHub Issue 的 `List` / `Get`；`SourceProbe.CheckSource`（驗 `gh` 安裝、授權、repo 權限）；錯誤分類對應三種抽象錯誤。                                                                 | **R08 feedback 相關**（建 comment、切 label、mention assignee）**一律不做**；D03 在 Stage 3 自行設計並補上。              | D05 設計文件（待撰寫）標註 Stage 3 區塊                            |
-| **D06 agent-runner（AgentProbe only）**                | 僅 `AgentProbe.CheckAgent`：例如 `gemini --version` 或 `claude --version` 能跑。                                                                                                       | `AgentExecutor.Run`（實際啟動 agent CLI、串流 output.jsonl、處理 exit code）**屬 Stage 3**。                              | D06 設計文件（待撰寫）標註 Stage 3 區塊                            |
+| **D06 agent-runner（AgentProbe only）**                | 僅 `AgentProbe.CheckAgent`：例如 `claude --version` 能跑。                                                                                                       | `AgentExecutor.Run`（實際啟動 agent CLI、串流 output.jsonl、處理 exit code）**屬 Stage 3**。                              | D06 設計文件（待撰寫）標註 Stage 3 區塊                            |
 | **D03 task-execution（TaskExecutor no-op）**           | 僅提供一個 no-op 實作：收到任務即記 `task.noop_executed`，**不改 status、不呼叫 agent、不動 git**。                                                                                    | 真正的 git 準備、input 組裝、agent 呼叫、result 處理、GitHub 回報**全部屬 Stage 3**。                                     | D03 設計文件（待撰寫）需同時描述 Stage 2 no-op 版與 Stage 3 完整版 |
 
 **給實作者的紀律**：若在 Stage 2 開發過程中發現「為了讓 D02 跑起來需要 Stage 3 才有的功能」，先停下來在 D03 / D05 / D06 的設計文件補充對應條目，而**不是**在 D02 內臨時補齊；若該條目尚未有設計，回頭與需求 / 設計擁有者對齊後再實作。本文件第 7 章的驗收清單 **只驗 Stage 2 範圍內** 的行為（同步能到本地、狀態機走對、daemon 能起能停能恢復），**不驗** agent 執行、PR、GitHub 回報。

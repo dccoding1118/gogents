@@ -18,7 +18,7 @@
 | `D03-task-execution.md` | `task-execution` | Stage 3 主模組 | R06 + R07 + R08 | 切 branch、組 input、呼 agent、解析 result、回報 GitHub |
 | `D04-logger.md` | `logger` | 橫切共用 | R09 | JSONL 雙檔；事件 schema 早期釘死 |
 | `D05-github-client.md` | `github-client` | 共用基礎 | 支援 R05 / R08 | `gh` CLI 封裝 + `TaskSource`（GitHub Issue）實作 + `SourceProbe` + `FeedbackReporter` |
-| `D06-agent-runner.md` | `agent-runner` | 適配層 | 支援 R06 | Agent CLI 抽象；Gemini / Claude 實作 |
+| `D06-agent-runner.md` | `agent-runner` | 適配層 | 支援 R06 | Agent CLI 抽象；Claude 實作 |
 | `D07-local-source.md` | `local-source` | concrete strategy | 支援 R11 | `local` 任務源：讀 `~/.am/tickets/` 的 `TaskSource` / `SourceProbe` / `ContentFetcher` / `FeedbackReporter`（與 D05 並列） |
 | `D08-runtime-cli.md` | `runtime-cli` | 觀測介面 | R12 | `gogents runtime list/status`、`gogents logs`；runtime 註冊寫入 `~/.gogents/config.yaml` |
 
@@ -111,7 +111,7 @@ D02 §1.1 是此原則的參考範例。
 ### 抽象化來源與適配層
 
 - Syncer / 主迴圈只認 `TaskSource`（`List` / `Get` / `Kind`）與抽象錯誤（`ErrSourceNotFound` / `ErrSourceAuth` / `ErrSourceTransient`）。
-- Agent 執行只認 `AgentExecutor`；Gemini 是實作，不是介面。
+- Agent 執行只認 `AgentExecutor`；Claude 是實作，不是介面。
 - 新增來源 / agent 型別 = 新增實作，不改上游設計。
 
 ### 事件日誌命名

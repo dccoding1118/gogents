@@ -35,8 +35,8 @@ source:
   filter:
     label: "queued"
 agent:
-  type: "gemini"
-  model: "pro"
+  type: "claude"
+  model: "claude-sonnet-5"
 `
 		_ = os.WriteFile(runtimeYaml, []byte(content), 0o600)
 		cfg, err := loader.Load(tmpDir)
@@ -86,10 +86,24 @@ agent:
 		c.Project.Repo.URL = "https://github.com/u/r"
 		c.Source.Type = "weird"
 		c.Source.Filter.Label = "l"
-		c.Agent.Type = "gemini"
+		c.Agent.Type = "claude"
 		c.Agent.Model = "m"
 		if err := validateConfigSchema(&c); !errors.Is(err, ErrConfigSchema) {
 			t.Errorf("expect ErrConfigSchema for unknown source.type, got %v", err)
+		}
+	})
+
+	t.Run("unsupported agent.type: gemini", func(t *testing.T) {
+		var c Config
+		c.RuntimeName = "x"
+		c.Project.Repo.URL = "https://github.com/u/r"
+		c.Source.Type = "github_issue"
+		c.Source.Instance = "u/r"
+		c.Source.Filter.Label = "l"
+		c.Agent.Type = "gemini"
+		c.Agent.Model = "m"
+		if err := validateConfigSchema(&c); !errors.Is(err, ErrConfigSchema) {
+			t.Errorf("expect ErrConfigSchema for agent.type=gemini, got %v", err)
 		}
 	})
 }

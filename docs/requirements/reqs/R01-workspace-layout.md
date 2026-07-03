@@ -23,11 +23,9 @@
 ├── <reponame>/                   # daemon 啟動時 git clone 進來
 │   ├── AGENTS.md                 # 使用者自行維護
 │   └── ... (專案程式碼)
-├── .gemini/                      # 使用者手動配置的 agent runtime 元素
-│   ├── settings.json
-│   └── skills/
-└── .claude/                      # 使用者手動配置的 agent runtime 元素
-    └── ...
+├── .claude/                      # 使用者手動配置的 agent runtime 元素
+│   └── ...
+└── .mcp.json                     # 使用者手動配置的 MCP 工具
 ```
 
 ## 全域目錄結構
@@ -59,7 +57,7 @@ github-<issue-number>
 - **使用者責任**：
   - 建立 workspace 根目錄
   - 放置 `.gogents/runtime.yaml`
-  - 手動配置 agent runtime 元素（`.gemini/`、`.mcp.json` 等）
+  - 手動配置 agent runtime 元素（`.claude/`、`.mcp.json` 等）
 - **Daemon 責任**：
   - 建立 `.gogents/tasks/`、`.gogents/state.yaml`
   - `git clone` repo 到 workspace 根目錄（見 R04）

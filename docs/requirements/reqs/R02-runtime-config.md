@@ -26,7 +26,7 @@ source:
   sync_interval: "2m"
 
 agent:
-  type: "claude"                  # 支援 gemini 或 claude
+  type: "claude"                  # 目前支援 claude
   model: "claude-3-5-sonnet-20241022"
 
 task_policy:
@@ -81,16 +81,8 @@ ticket 檔為 YAML,欄位由 am 定義;gogents 僅讀執行所需欄位並回寫
 
 - **抽象屬性**: 目前僅定義 `type` 與 `model`
 - **Type 對應實作**: 每個 type 由獨立 executor 實作
-- **目前支援範圍**: 實作 `type: gemini` 與 `type: claude`
+- **目前支援範圍**: 實作 `type: claude`
 - **自訂參數**: 目前不提供 `args` 逃生艙口
-
-### Gemini executor 行為
-
-`type: gemini` 的 executor 將屬性翻譯為:
-
-```text
-cat input.md | gemini -m <model>
-```
 
 ### Claude executor 行為
 
@@ -146,7 +138,7 @@ Daemon 啟動時依序執行以下檢查,任一失敗即拒絕啟動並寫入 st
 - 必填欄位齊全(runtime_name、project.repo.url、source.*、agent.type、agent.model)
 - `source.type` 為支援的值(`github_issue` 或 `local`)
 - 依 `source.type` 檢查其專屬必填欄位:`github_issue` 需 `source.instance`;`local` 需 `source.filter.label`(`source.path` 省略時預設 `~/.am/tickets`)
-- `agent.type` 為支援的值(`gemini` 或 `claude`)
+- `agent.type` 為支援的值(`claude`)
 - `sync_interval` 可被 `time.ParseDuration` 解析
 - `task_policy.max_failures` 為正整數(未設定則用預設值 3)
 
@@ -170,11 +162,6 @@ Daemon 啟動時依序執行以下檢查,任一失敗即拒絕啟動並寫入 st
 ### 階段 3:agent 工具鏈檢查
 
 依 `agent.type` 執行對應檢查,由各 agent executor 模組實作。
-
-**`agent.type: gemini` 的檢查項目:**
-
-1. **工具安裝**: 確認 `gemini` 指令在 PATH 中可執行
-2. **授權狀態**: 目前不主動驗證(gemini CLI 的授權機制由使用者預先完成),若實際執行時才發現未授權,視為任務執行失敗(見 R07)
 
 **`agent.type: claude` 的檢查項目:**
 

@@ -58,7 +58,7 @@ graph LR
 | `source.path`                 | string                  | ticket inbox 路徑（`local`；預設 `~/.am/tickets`） |
 | `source.filter.label`         | string                  | 觸發 / 認領 label（必填）        |
 | `source.sync_interval`        | duration                | Sync 間隔（例：`60s`）           |
-| `agent.type`                  | enum `gemini`, `claude` | Agent CLI 型別                   |
+| `agent.type`                  | enum `claude`           | Agent CLI 型別                   |
 | `agent.model`                 | string                  | Agent 模型識別                   |
 | `task_policy.max_failures`    | int                     | 累計失敗上限                     |
 | `assignee`                    | string                  | 預設 GitHub mention 對象         |
