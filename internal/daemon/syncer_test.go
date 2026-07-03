@@ -43,11 +43,15 @@ func (m *mockFeedback) Report(ctx context.Context, input source.FeedbackInput) s
 
 type mockLogger struct{}
 
-func (m *mockLogger) Info(event, taskID, msg string, fields map[string]any)                        {}
-func (m *mockLogger) Warning(event, taskID, msg string, fields map[string]any)                     {}
-func (m *mockLogger) Error(event, taskID, msg string, fields map[string]any)                       {}
+func (m *mockLogger) Info(event, taskID, msg string, fields map[string]any) {}
+
+func (m *mockLogger) Warning(event, taskID, msg string, fields map[string]any) {}
+
+func (m *mockLogger) Error(event, taskID, msg string, fields map[string]any) {}
+
 func (m *mockLogger) Log(level logger.Level, event, taskID, message string, fields map[string]any) {}
-func (m *mockLogger) Close() error                                                                 { return nil }
+
+func (m *mockLogger) Close() error { return nil }
 
 type mockStore struct {
 	tasks []foundation.Task

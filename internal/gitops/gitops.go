@@ -46,6 +46,7 @@ func (r *defaultTaskBranchRunner) Fetch(ctx context.Context, repoDir string) err
 }
 
 func (r *defaultTaskBranchRunner) CheckoutBranch(ctx context.Context, repoDir, branch, base string) error {
+	//nolint:gosec // fixed git subcommand; branch/base derived from trusted config
 	cmd := exec.CommandContext(ctx, "git", "checkout", "-B", branch, base)
 	cmd.Dir = repoDir
 	output, err := cmd.CombinedOutput()
@@ -81,6 +82,7 @@ func NewRunner() Runner {
 }
 
 func (r *defaultRunner) Clone(ctx context.Context, url, dir string) error {
+	//nolint:gosec // fixed git subcommand; url/dir derived from trusted config
 	cmd := exec.CommandContext(ctx, "git", "clone", url, dir)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

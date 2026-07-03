@@ -17,15 +17,16 @@ var (
 	ErrNotGitRepo      = errors.New("workspace is not a git repository")
 )
 
-// GlobalConfig represents ~/.gogents/config.yaml (registry structure).
-// Currently only used for future admin channel; daemon startup takes
-// workspace path directly via --workspace flag.
+// GlobalConfig represents ~/.gogents/config.yaml — the runtime registry
+// maintained by `gogents start`. It is keyed by workspace path and consumed by
+// the observability CLI (`gogents runtime list/status`, `gogents logs`) and by
+// agent-manager to locate each worker.
 type GlobalConfig struct {
-	ActiveRuntime string                `yaml:"active_runtime"`
-	Runtimes      []RuntimeRegistration `yaml:"runtimes"`
+	Runtimes []RuntimeRegistration `yaml:"runtimes"`
 }
 
 // RuntimeRegistration is an entry in the global runtimes registry.
+// The workspace path is the primary key for upsert.
 type RuntimeRegistration struct {
 	Name         string `yaml:"name"`
 	Workspace    string `yaml:"workspace"`
@@ -48,7 +49,8 @@ type Config struct {
 	} `yaml:"project"`
 	Source struct {
 		Type     string `yaml:"type"`
-		Instance string `yaml:"instance"`
+		Instance string `yaml:"instance,omitempty"` // github_issue: owner/repo
+		Path     string `yaml:"path,omitempty"`     // local: ticket inbox dir (default ~/.am/tickets)
 		Filter   struct {
 			Label string `yaml:"label"`
 		} `yaml:"filter"`
@@ -155,6 +157,26 @@ func validateConfigSchema(cfg *Config) error {
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("%w: missing required fields: %v", ErrConfigSchema, missing)
+	}
+
+	// source.type enum + per-type required fields.
+	switch cfg.Source.Type {
+	case "github_issue":
+		if cfg.Source.Instance == "" {
+			return fmt.Errorf("%w: source.instance is required for source.type=github_issue", ErrConfigSchema)
+		}
+	case "local":
+		// source.path is optional (defaults to ~/.am/tickets); filter.label is
+		// already required above.
+	default:
+		return fmt.Errorf("%w: unsupported source.type: %q", ErrConfigSchema, cfg.Source.Type)
+	}
+
+	// agent.type enum.
+	switch cfg.Agent.Type {
+	case "gemini", "claude":
+	default:
+		return fmt.Errorf("%w: unsupported agent.type: %q", ErrConfigSchema, cfg.Agent.Type)
 	}
 
 	// Apply defaults.

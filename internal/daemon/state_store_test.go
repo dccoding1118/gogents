@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/dccoding/gogents/internal/foundation"
 )
 
 func TestStateStore(t *testing.T) {
@@ -63,6 +65,20 @@ func TestStateStore(t *testing.T) {
 		st, _ := store.Load()
 		if st.CurrentTask.TaskID != "t-1" {
 			t.Error("update task failed")
+		}
+	})
+
+	t.Run("D02-14 SetRuntimeState", func(t *testing.T) {
+		if err := store.SetRuntimeState(foundation.RuntimeVerifying); err != nil {
+			t.Fatal(err)
+		}
+		st, _ := store.Load()
+		if st.RuntimeState != foundation.RuntimeVerifying {
+			t.Errorf("expected verifying, got %s", st.RuntimeState)
+		}
+		// Ensure it does not clobber unrelated fields.
+		if st.CurrentTask.TaskID != "t-1" {
+			t.Errorf("SetRuntimeState clobbered current_task: %s", st.CurrentTask.TaskID)
 		}
 	})
 

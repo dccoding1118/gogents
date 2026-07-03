@@ -80,6 +80,17 @@ timestamps:
   updated_at: "2026-04-07T10:05:00Z"
 ```
 
+## 來源型別差異
+
+上述 task.yaml 的 `source` 子欄位以 `github_issue` 為例(`number` / `issue_state` / `issue_updated_at`)。`source.type` 決定 `task_id` 格式與 `source` 子欄位:
+
+| source.type    | task_id 格式          | source 子欄位重點                          |
+| -------------- | --------------------- | ------------------------------------------ |
+| `github_issue` | `github-<number>`     | `number` / `url` / `issue_state` / `issue_updated_at` |
+| `local`        | ticket 的 `id`        | ticket 路徑、`label`、ticket `updated_at`(見 R11) |
+
+狀態機本身與來源型別無關;各狀態轉換規則兩種來源共用。local 型別的來源刪除偵測、reopen 等對應規則由 R11 定義,語義比照本文件。
+
 ## 狀態轉換規則
 
 | 從             | 到         | 觸發條件                                                              |
@@ -140,3 +151,4 @@ timestamps:
 - R06 - 任務執行流程(負責 status 從 queued → processing)
 - R07 - 結果處理(負責 status 從 processing → done/reporting/failed、更新 failure_count)
 - R08 - GitHub 狀態回報(回傳成功/失敗決定 done 或 reporting)
+- R11 - 本地任務源(`local` 型別的 task_id 格式與 source 欄位、刪除/reopen 對應)

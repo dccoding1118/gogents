@@ -133,6 +133,7 @@ func (r *ghRunner) runWithRetry(ctx context.Context, cmdName string, args []stri
 			return nil, err
 		}
 
+		//nolint:gosec // cmdName is a fixed CLI ("gh"); args assembled internally
 		cmd := exec.CommandContext(ctx, cmdName, args...)
 		outWriter := &strings.Builder{}
 		errWriter := &strings.Builder{}

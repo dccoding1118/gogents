@@ -1,6 +1,7 @@
 package source
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/dccoding/gogents/internal/foundation"
@@ -13,6 +14,8 @@ func NewTaskSourceFromConfig(cfg foundation.Config, lg logger.Logger) (TaskSourc
 	switch cfg.Source.Type {
 	case "github_issue":
 		return newGitHubIssueSource(cfg, lg), nil
+	case "local":
+		return newLocalTicketSource(cfg, lg), nil
 	default:
 		return nil, fmt.Errorf("unsupported source.type: %q", cfg.Source.Type)
 	}
@@ -24,6 +27,8 @@ func NewSourceProbeFromConfig(cfg foundation.Config, lg logger.Logger) (SourcePr
 	switch cfg.Source.Type {
 	case "github_issue":
 		return newGitHubIssueProbe(cfg, lg), nil
+	case "local":
+		return newLocalTicketProbe(cfg, lg), nil
 	default:
 		return nil, fmt.Errorf("unsupported source.type: %q", cfg.Source.Type)
 	}
@@ -35,6 +40,8 @@ func NewFeedbackReporterFromConfig(cfg foundation.Config, lg logger.Logger) (Fee
 	switch cfg.Source.Type {
 	case "github_issue":
 		return newGitHubFeedbackReporter(cfg, lg), nil
+	case "local":
+		return newLocalTicketReporter(cfg, lg), nil
 	default:
 		return nil, fmt.Errorf("unsupported source.type: %q", cfg.Source.Type)
 	}
@@ -46,7 +53,31 @@ func NewTaskContentFetcherFromConfig(cfg foundation.Config, lg logger.Logger) (T
 	switch cfg.Source.Type {
 	case "github_issue":
 		return newGitHubIssueContentFetcher(cfg, lg), nil
+	case "local":
+		return newLocalTicketContentFetcher(cfg, lg), nil
 	default:
 		return nil, fmt.Errorf("unsupported source.type: %q", cfg.Source.Type)
 	}
+}
+
+// NewTaskVerifierFromConfig selects a concrete TaskVerifier based on cfg.Source.Type.
+// github_issue has no ticket-declared verify, so it returns a verifier that
+// always reports ok=false (D03 falls back to the result.json verdict).
+func NewTaskVerifierFromConfig(cfg foundation.Config, lg logger.Logger) (TaskVerifier, error) {
+	switch cfg.Source.Type {
+	case "github_issue":
+		return nopVerifier{}, nil
+	case "local":
+		return newLocalTicketVerifier(cfg, lg), nil
+	default:
+		return nil, fmt.Errorf("unsupported source.type: %q", cfg.Source.Type)
+	}
+}
+
+// nopVerifier reports no ticket-declared verification; callers fall back to the
+// result.json coding verdict.
+type nopVerifier struct{}
+
+func (nopVerifier) VerifySpec(_ context.Context, _ string) (VerifySpec, bool, error) {
+	return VerifySpec{}, false, nil
 }

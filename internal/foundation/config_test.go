@@ -31,6 +31,7 @@ project:
     url: "https://github.com/user/repo"
 source:
   type: "github_issue"
+  instance: "user/repo"
   filter:
     label: "queued"
 agent:
@@ -51,6 +52,44 @@ agent:
 		err := validateConfigSchema(&Config{})
 		if !errors.Is(err, ErrConfigSchema) {
 			t.Errorf("expect ErrConfigSchema, got %v", err)
+		}
+	})
+
+	t.Run("D01-17 local source", func(t *testing.T) {
+		runtimeYaml := paths.RuntimeYaml()
+		content := `
+runtime_name: "worker-a"
+project:
+  repo:
+    url: "https://github.com/user/repo"
+source:
+  type: "local"
+  filter:
+    label: "backend"
+agent:
+  type: "claude"
+  model: "claude-sonnet-5"
+`
+		_ = os.WriteFile(runtimeYaml, []byte(content), 0o600)
+		cfg, err := loader.Load(tmpDir)
+		if err != nil {
+			t.Fatalf("local config should load: %v", err)
+		}
+		if cfg.Source.Type != "local" || cfg.Source.Filter.Label != "backend" {
+			t.Errorf("local source not parsed: %+v", cfg.Source)
+		}
+	})
+
+	t.Run("unsupported source.type", func(t *testing.T) {
+		var c Config
+		c.RuntimeName = "x"
+		c.Project.Repo.URL = "https://github.com/u/r"
+		c.Source.Type = "weird"
+		c.Source.Filter.Label = "l"
+		c.Agent.Type = "gemini"
+		c.Agent.Model = "m"
+		if err := validateConfigSchema(&c); !errors.Is(err, ErrConfigSchema) {
+			t.Errorf("expect ErrConfigSchema for unknown source.type, got %v", err)
 		}
 	})
 }

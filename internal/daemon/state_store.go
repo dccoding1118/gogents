@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/dccoding/gogents/internal/foundation"
 )
 
 // StateStore provides atomic read/write for state.yaml (D02 §4.5).
@@ -18,13 +20,16 @@ type StateStore interface {
 	Save(s State) error
 	UpdateSync(fn func(*SyncState)) error
 	UpdateCurrentTask(fn func(*CurrentTask)) error
+	// SetRuntimeState atomically writes the explicit runtime_state (R04, R12).
+	SetRuntimeState(ws foundation.RuntimeState) error
 }
 
 // State is the top-level structure of state.yaml.
 type State struct {
-	Daemon      DaemonState `yaml:"daemon"`
-	Sync        SyncState   `yaml:"sync"`
-	CurrentTask CurrentTask `yaml:"current_task"`
+	Daemon       DaemonState             `yaml:"daemon"`
+	RuntimeState foundation.RuntimeState `yaml:"runtime_state,omitempty"`
+	Sync         SyncState               `yaml:"sync"`
+	CurrentTask  CurrentTask             `yaml:"current_task"`
 }
 
 // DaemonState holds daemon process metadata.
@@ -101,6 +106,18 @@ func (s *defaultStateStore) UpdateCurrentTask(fn func(*CurrentTask)) error {
 		return err
 	}
 	fn(&st.CurrentTask)
+	return s.atomicWrite(st)
+}
+
+func (s *defaultStateStore) SetRuntimeState(ws foundation.RuntimeState) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	st, err := s.loadUnlocked()
+	if err != nil {
+		return err
+	}
+	st.RuntimeState = ws
 	return s.atomicWrite(st)
 }
 

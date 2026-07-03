@@ -4,20 +4,22 @@
 
 ## 1. 專案概覽 (Project Overview)
 `gogents` 是一個基於 Go 語言開發的自動化系統，其核心工作流為：
-1. **Sync**: 從外部 Tasks Source (目前為 GitHub) 同步指派任務。
-2. **Execute**: 根據任務定義，呼叫 LLM Agent (Gemini/Claude) 在本地工作區執行任務。
-3. **Report**: 執行完成後，將結果與日誌回傳至來源平台。
+1. **Sync**: 從外部 Task Source 同步指派任務。來源型別由 `source.type` 決定：`github_issue` (GitHub Issue) 或 `local` (本地 `~/.am/tickets/` ticket inbox，對接 agent-manager)。
+2. **Execute**: 根據任務定義，呼叫 LLM Agent (Gemini/Claude) 在本地工作區執行任務 (agent 工作目錄為 workspace 根，使 workspace 級 `.claude/`、`.mcp.json` 生效)。
+3. **Verify & Report**: 執行完成後，依 ticket 宣告的 `verify` (或 fallback `result.json`) 判定成敗，將結果與日誌回傳至來源 (GitHub 留言 / 回寫 ticket 檔)。
+
+作為 agent-manager (am) 的執行面：am 派工到 `~/.am/tickets/`，gogents worker daemon 依 label 認領執行、回寫終態；am 經 `gogents runtime status` / `gogents logs` 查詢執行狀態 (單向 `am → gogents`)。
 
 ## 2. 目錄結構與導覽 (Directory Structure)
 
 ### 核心入口
-- `cmd/gogents/`: 應用程式進入點 (main.go)，處理 CLI 指令定義。
+- `cmd/gogents/`: 應用程式進入點 (main.go)，處理 CLI 指令定義 (`start`、`runtime list`、`runtime status`、`logs`)。
 - `bin/`: 編譯後的執行檔輸出目錄。
 - `logs/`: 測試報告、覆蓋率與執行日誌輸出目錄。
 
 ### 內部模組 (`internal/`)
 - `internal/foundation/`: 底層基礎建設。
-    - `config.go`: 全域配置與環境變數載入。
+    - `config.go`: 全域配置載入；`~/.gogents/config.yaml` runtime 註冊表 (以 workspace 路徑為 key 的 upsert)。
     - `workspace.go`: 工作區路徑管理與目錄結構定義。
     - `task_store.go`: 任務狀態持久化管理。
 - `internal/daemon/`: 守護進程與同步邏輯。
@@ -26,18 +28,20 @@
 - `internal/agent/`: LLM Agent 適配器。
     - `dispatcher.go`: 根據配置挑選適當的 Agent (如 Gemini 或 Claude)。
     - `gemini.go`, `claude.go`: 具體的 Agent 實現。
-- `internal/source/`: 外部任務來源適配器。
-    - `github.go`: GitHub API 整合，用於獲取 Issues。
-    - `dispatcher.go`: 多來源分派器。
+- `internal/source/`: 外部任務來源適配器 (TaskSource / SourceProbe / ContentFetcher / FeedbackReporter)。
+    - `github.go`: `github_issue` 實作，透過 `gh` CLI 存取 Issues。
+    - `local*.go`: `local` 實作，讀 `~/.am/tickets/` ticket inbox、依 label 認領、回寫終態。
+    - `dispatcher.go`: 依 `source.type` 分派 concrete strategy 的 factory (`NewTaskSourceFromConfig` 等)。
 - `internal/execution/`: 任務執行引擎。
-    - `runner.go`: 控制任務執行的具體流程 (Prepare -> Run -> Judge)。
-    - `judge.go`: 判別執行結果是否成功。
+    - `runner.go`: 控制任務執行的具體流程 (Prepare -> Run -> Verify -> Judge)；agent 工作目錄為 workspace 根。
+    - `judge.go`: 判別執行結果是否成功 (ticket `verify` 指令 exit code，或 fallback `result.json`)。
 - `internal/gitops/`: Git 操作封裝。
 - `internal/logger/`: 結構化日誌記錄工具。
 
 ### 文檔資源 (`docs/`)
-- `docs/designs/`: 包含各階段 (D01-D06) 的詳細架構設計文件。開發前務必閱讀對應模組的設計。
-- `docs/requirements/`: 需求規格文件。
+- `docs/designs/`: 詳細架構設計文件 (D01-D08)。開發前務必閱讀對應模組的設計。
+- `docs/requirements/`: 需求規格文件 (R01-R12)。
+- `docs/changes/`: 變更提案 (CH-00x)，描述跨模組的功能變更範圍。
 
 ## 3. 環境設定與指令 (Environment & Mise)
 
@@ -63,6 +67,9 @@
 - **我要改變任務狀態的處理方式**: 修改 `internal/foundation/task_store.go`。
 - **我要解決同步 (Sync) 失敗的問題**: 查看 `internal/source/` 下的對應適配器與 `internal/daemon/syncer.go`。
 - **任務執行邏輯有誤 (Execution)**: 查看 `internal/execution/runner.go`。
+- **我要新增一種任務來源 (如 local)**: 於 `internal/source/` 新增 concrete strategy，並在 `internal/source/dispatcher.go` 的各 factory `switch` 加 case。
+- **我要調整驗證方式 (verify / result.json)**: 修改 `internal/execution/judge.go`。
+- **我要調整 runtime 註冊或觀測 CLI**: 註冊寫入見 `internal/foundation/config.go` 與 daemon `start`；查詢指令見 `cmd/gogents/`；`runtime_state` 見 `internal/daemon/state_store.go`。
 
 ## 5. 測試與品質規範 (Testing & Quality)
 - **單元測試**: 所有核心邏輯必須撰寫單元測試，且 **涵蓋率 (Coverage) 至少需達到 80%**。

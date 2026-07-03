@@ -53,9 +53,10 @@ graph LR
 | `runtime_name`                | string                  | Runtime 識別名                   |
 | `project.repo.url`            | string                  | Git repo URL                     |
 | `project.repo.default_branch` | string                  | 預設 base branch                 |
-| `source.type`                 | enum `github_issue`     | 任務來源型別                     |
-| `source.instance`             | string                  | 任務來源實例（例如：owner/repo） |
-| `source.filter.label`         | string                  | 觸發 label（必填）               |
+| `source.type`                 | enum `github_issue`, `local` | 任務來源型別                |
+| `source.instance`             | string                  | 任務來源實例（`github_issue`：owner/repo） |
+| `source.path`                 | string                  | ticket inbox 路徑（`local`；預設 `~/.am/tickets`） |
+| `source.filter.label`         | string                  | 觸發 / 認領 label（必填）        |
 | `source.sync_interval`        | duration                | Sync 間隔（例：`60s`）           |
 | `agent.type`                  | enum `gemini`, `claude` | Agent CLI 型別                   |
 | `agent.model`                 | string                  | Agent 模型識別                   |
@@ -78,7 +79,7 @@ graph LR
 | `InputMd(id)`        | `<workspace>/.gogents/tasks/<id>/input.md`     | D03             |
 | `OutputJsonl(id)`    | `<workspace>/.gogents/tasks/<id>/output.jsonl` | D06             |
 | `ResultJson(id)`     | `<workspace>/.gogents/tasks/<id>/result.json`  | Agent           |
-| `GlobalConfigYaml()` | `~/.gogents/config.yaml`                       | 使用者          |
+| `GlobalConfigYaml()` | `~/.gogents/config.yaml`                       | D01 (GlobalConfigStore) |
 | `LogsDir()`          | `~/.gogents/logs/<hash>/`                      | D01 (Init)      |
 | `DaemonLog()`        | `~/.gogents/logs/<hash>/daemon.jsonl`          | D04             |
 | `ErrorLog()`         | `~/.gogents/logs/<hash>/error.jsonl`           | D04             |
@@ -110,6 +111,19 @@ graph LR
 | 任意 → `deleted`                   | sync 偵測到 issue 刪除                                                |
 
 其餘組合一律 `IllegalTransitionError`。
+
+**GlobalConfig（`~/.gogents/config.yaml`）**
+
+全域 runtime 註冊表；由 D08（`gogents start`）於啟動時 upsert 寫入，供觀測 CLI 與 am 定位 runtime。**不含 `active_runtime` 欄位**。
+
+| 欄位                        | 型別                    | 說明                                    |
+| --------------------------- | ----------------------- | --------------------------------------- |
+| `runtimes[]`                | `[]RuntimeRegistration` | 已註冊 runtime 列表                     |
+| `runtimes[].name`           | string                  | runtime_name                            |
+| `runtimes[].workspace`      | string                  | workspace 絕對路徑（**upsert 主鍵**）   |
+| `runtimes[].registered_at`  | RFC3339                 | 最近一次 `start` 註冊時間               |
+
+upsert 語義：以 `workspace` 路徑比對；已存在則覆蓋該筆 `name` / `registered_at`，否則 append。序列化與原子寫入風格同 TaskStore（write-tmp → fsync → rename）。
 
 ## 4. 關鍵介面
 
@@ -178,6 +192,26 @@ type TaskPatch struct {
 }
 
 var ErrIllegalTransition = errors.New("illegal task state transition")
+
+// 全域 runtime 註冊表存取（~/.gogents/config.yaml）；由 D08 start 呼叫 Upsert，
+// 由觀測 CLI（D08）呼叫 Load / Resolve。upsert 以 workspace 路徑為主鍵。
+type GlobalConfigStore interface {
+    Load() (GlobalConfig, error)                       // 檔案不存在回零值 + nil error
+    Upsert(reg RuntimeRegistration) error              // 以 reg.Workspace 為 key 覆蓋或新增；原子寫入
+    Resolve(workspaceOrName string) (RuntimeRegistration, error) // 供 CLI 以 workspace 路徑或 name 反查
+}
+
+type GlobalConfig struct {
+    Runtimes []RuntimeRegistration
+}
+
+type RuntimeRegistration struct {
+    Name         string
+    Workspace    string      // upsert 主鍵
+    RegisteredAt time.Time
+}
+
+var ErrRuntimeNotRegistered = errors.New("runtime not found in ~/.gogents/config.yaml")
 ```
 
 呼叫者使用流程：由 D02 啟動時建立 `ConfigLoader`、組裝 `ToolchainProbe`（git = 本模組內建；source = D05；agent = D06）、建立 `WorkspacePaths` 與 `TaskStore`，後續傳入各模組使用。

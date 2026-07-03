@@ -58,15 +58,16 @@ graph LR
 
 ## 2. 行為契約
 
-- **B1 啟動序列**：收到 `gogents start --workspace <path>` 後依序執行 8 步，任一失敗即 exit ≠ 0、寫 error 事件、不進主迴圈。
+- **B1 啟動序列**：收到 `gogents start --workspace <path>` 後依序執行，任一失敗即 exit ≠ 0、寫 error 事件、不進主迴圈（註冊步驟失敗除外，見第 7 步）。
   1. 驗證 workspace 路徑存在且為目錄
-  2. 組裝 probe（git 由 D01 內建；source 由 D05 提供；agent 由 D06 提供）
+  2. 組裝 probe（git 由 D01 內建；source 由 dispatcher 依 `source.type` 選 D05 / D07 提供；agent 由 D06 提供）
   3. 呼叫 D01：`Load` + `Preflight`
   4. 開啟 logger（建 `~/.gogents/logs/<hash>/` 與兩檔）
   5. 準備 repo 目錄：不存在 → `git clone`；為 git repo → `git fetch origin`；非 git repo → 拒啟
-  6. 載入 / 初始化 `state.yaml`
-  7. 重啟恢復：所有 `processing` 任務透過 `TaskStore.Transition(→ queued)`，patch 清除 `execution.started_at`，**`failure_count` 不增**；每筆寫 warning 事件 `daemon.restart_reset`
-  8. 寫 `daemon.started` 事件，進入主迴圈
+  6. 註冊 runtime：`GlobalConfigStore.Upsert`（以 workspace 為 key）寫入 `~/.gogents/config.yaml`（見 D08）；寫入失敗僅記 warning `config.register_failed`、**不中止啟動**（config.yaml 屬觀測輔助）
+  7. 載入 / 初始化 `state.yaml`，`runtime_state` 設為 `idle`
+  8. 重啟恢復：所有 `processing` 任務透過 `TaskStore.Transition(→ queued)`，patch 清除 `execution.started_at`，**`failure_count` 不增**；每筆寫 warning 事件 `daemon.restart_reset`
+  9. 寫 `daemon.started` 事件，進入主迴圈
 - **B2 主迴圈**：時間觸發、序列化、**每 tick 最多執行一個 queued 任務**。
   - 等待至下一個 `sync_interval` 觸發點
   - 呼叫 Syncer 完成一次 sync
@@ -96,11 +97,16 @@ graph LR
 | `daemon.pid`              | int                       | 目前 daemon 行程 PID       |
 | `daemon.started_at`       | RFC3339                   | 啟動時間                   |
 | `daemon.workspace`        | string                    | workspace 絕對路徑         |
+| `runtime_state`            | enum（見下）              | daemon 顯式執行階段        |
 | `sync.last_sync_at`       | RFC3339 / null            | 最近一次 sync 完成時間     |
 | `sync.last_sync_status`   | enum `success` / `failed` | 最近一次 sync 結果         |
 | `sync.last_sync_error`    | string / null             | `failed` 時的錯誤訊息      |
 | `current_task.task_id`    | string / null             | 進行中任務 id（無則 null） |
 | `current_task.started_at` | RFC3339 / null            | 任務開始時間               |
+
+`runtime_state` 枚舉：`idle`（無任務等待中）/ `executing`（agent coding 中）/ `verifying`（跑 ticket verify 中，見 D07）/ `reporting`（回報中）/ `failed`（最近一次任務失敗）/ `broken`（daemon 自身異常）。**`down` 不落檔**——由查詢端（D08 `runtime status`）依 pid 不存在推得。
+
+落檔責任：state.yaml 屬 D02，`runtime_state` 的原子寫入統一經 `StateStore.SetRuntimeState`。D02 於主迴圈設定粗粒度：無 queued 任務時→`idle`、進入任務前→`executing`。細粒度階段（`verifying` / `reporting`）與任務終態（成功→`idle`、失敗→`failed`）由 **D03 透過 D02 注入的 `RuntimeStateSetter`** 於對應步驟寫入——D03 不直接開 state.yaml 檔（維持 D03 §1「不觸碰 state.yaml」），僅呼叫該 setter。`RuntimeStateSetter` 為 `StateStore.SetRuntimeState` 的窄化包裝，於 daemon 組裝 `execution.Deps` 時注入。
 
 ### 3.3 Sync 輪次產物（供事件輸出）
 
@@ -118,7 +124,9 @@ graph LR
 
 | 事件                        | 何時                                     |
 | --------------------------- | ---------------------------------------- |
-| `daemon.started`            | B1 第 8 步                               |
+| `daemon.registered`         | B1 註冊步驟 upsert 成功                   |
+| `config.register_failed`    | B1 註冊步驟 upsert 失敗（warning，不拒啟） |
+| `daemon.started`            | B1 最後一步                              |
 | `daemon.stopping`           | 收到第一次信號                           |
 | `daemon.stopped`            | 正常退出                                 |
 | `daemon.force_stopped`      | 第二次信號強制退出                       |
@@ -260,14 +268,29 @@ func NewSourceProbeFromConfig(cfg foundation.Config, lg logger.Logger) (foundati
 // NewFeedbackReporterFromConfig 依 cfg.Source.Type 選擇 concrete FeedbackReporter。
 // Stage 3 才被 D03 使用；Stage 2 可不呼叫。
 func NewFeedbackReporterFromConfig(cfg foundation.Config, lg logger.Logger) (source.FeedbackReporter, error)
+
+// NewTaskContentFetcherFromConfig 依 cfg.Source.Type 選擇 concrete TaskContentFetcher（D03 §4.3）。
+// 由 D03 於 R06 執行階段組 input.md 前呼叫。
+func NewTaskContentFetcherFromConfig(cfg foundation.Config, lg logger.Logger) (source.TaskContentFetcher, error)
+
+// NewTaskVerifierFromConfig 依 cfg.Source.Type 選擇 concrete TaskVerifier（D03 §4.6）。
+// github_issue 回永遠 ok=false 的實作；local 由 D07 提供讀 ticket verify.cmd 的實作。
+func NewTaskVerifierFromConfig(cfg foundation.Config, lg logger.Logger) (source.TaskVerifier, error)
 ```
 
-**Concrete 分工（Phase 1）**
+**Concrete 分工**
 
-| `cfg.Source.Type` | TaskSource                                                      | SourceProbe                      | FeedbackReporter                                       |
-| ----------------- | --------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------ |
-| `github_issue`    | `github.NewGitHubIssueSource(cfg, lg)`                          | `github.NewGitHubIssueProbe(lg)` | `github.NewGitHubFeedbackReporter(cfg, lg)`（Stage 3） |
-| 其他              | 回 `fmt.Errorf("unsupported source.type: %q", cfg.Source.Type)` | 同左                             | 同左                                                   |
+四個 factory 各自對應一個 strategy interface；每新增一種 `source.type` 即為每個 factory 的 `switch` 加一個 case。
+
+| `cfg.Source.Type` | TaskSource                             | SourceProbe                      | FeedbackReporter                            | TaskContentFetcher                        |
+| ----------------- | -------------------------------------- | -------------------------------- | ------------------------------------------- | ----------------------------------------- |
+| `github_issue`    | `github.NewGitHubIssueSource(cfg, lg)` | `github.NewGitHubIssueProbe(lg)` | `github.NewGitHubFeedbackReporter(cfg, lg)` | `github.NewGitHubIssueContentFetcher(cfg, lg)` |
+| `local`           | `local.NewLocalTicketSource(cfg, lg)`  | `local.NewLocalTicketProbe(lg)`  | `local.NewLocalTicketReporter(cfg, lg)`     | `local.NewLocalTicketContentFetcher(cfg, lg)` |
+| 其他              | 回 `fmt.Errorf("unsupported source.type: %q", cfg.Source.Type)` | 同左 | 同左 | 同左 |
+
+`github_issue` 的 concrete 定義於 D05；`local` 的 concrete 定義於 D07。dispatcher 本身不認識任一 concrete 的內部邏輯。
+
+第五個 factory `NewTaskVerifierFromConfig`（D03 §4.6）同結構：`github_issue` → 回永遠 `ok=false` 的 verifier（走 result.json fallback）；`local` → `local.NewLocalTicketVerifier(cfg, lg)`（讀 ticket `verify.cmd`）。
 
 **實作形式（`switch` 展開，僅示意）**
 
@@ -276,13 +299,15 @@ func NewTaskSourceFromConfig(cfg foundation.Config, lg logger.Logger) (TaskSourc
     switch cfg.Source.Type {
     case "github_issue":
         return github.NewGitHubIssueSource(cfg, lg), nil
+    case "local":
+        return local.NewLocalTicketSource(cfg, lg), nil
     default:
         return nil, fmt.Errorf("unsupported source.type: %q", cfg.Source.Type)
     }
 }
 ```
 
-`NewSourceProbeFromConfig` / `NewFeedbackReporterFromConfig` 結構相同，僅呼叫的 concrete 構造函式不同。
+其餘三個 factory（`NewSourceProbeFromConfig` / `NewFeedbackReporterFromConfig` / `NewTaskContentFetcherFromConfig`）結構相同，僅呼叫的 concrete 構造函式不同。
 
 **邊界紀律**
 
@@ -301,13 +326,20 @@ type StateStore interface {
     Save(s State) error            // 原子寫入
     UpdateSync(fn func(*SyncState))          error
     UpdateCurrentTask(fn func(*CurrentTask)) error
+    SetRuntimeState(ws RuntimeState)           error   // 原子寫入 runtime_state；供 D02 主迴圈與 D03 各階段呼叫
 }
 
 type State struct {
     Daemon      DaemonState
+    RuntimeState RuntimeState
     Sync        SyncState
     CurrentTask CurrentTask
 }
+
+// RuntimeState 列舉定義於 foundation（`foundation.RuntimeState`），供 daemon 與
+// execution 共用而不致 import cycle（execution 不得 import daemon）。值：
+// idle / executing / verifying / reporting / failed / broken。
+// "down" 不在此列舉——非落檔值，由 D08 查詢時依 pid 推得。
 ```
 
 ## 5. 程式資料流
@@ -330,15 +362,20 @@ Daemon.Run(ctx, ws)
         not exist  → git clone repo.url <ws>/<reponame>
         is git     → git fetch origin
         not git    → exit 5 + "daemon.repo_invalid"
-  7. state := StateStore.Load()
+  7. 註冊 runtime（D01.GlobalConfigStore.Upsert，見 D08）
+        reg := {name=cfg.RuntimeName, workspace=ws, registered_at=now}
+        err := gcfg.Upsert(reg)               ── 失敗僅 emit "config.register_failed" warning，不中止啟動
+        emit "daemon.registered" {workspace, name}
+  8. state := StateStore.Load()
      state.Daemon = {pid=os.getpid(), started_at=now, workspace=ws}
+     state.RuntimeState = idle
      StateStore.Save(state)
-  8. 重啟恢復：for t in store.List() where t.status == processing:
+  9. 重啟恢復：for t in store.List() where t.status == processing:
         store.Transition(t.id, queued, patch{StartedAt=nil, FailureCount=unchanged})
         emit "daemon.restart_reset" {id}
-  9. emit "daemon.started" {pid, workspace, runtime_name}
- 10. go signalWatcher(ctx cancel 觸發點)
- 11. mainLoop(ctx)
+ 10. emit "daemon.started" {pid, workspace, runtime_name}
+ 11. go signalWatcher(ctx cancel 觸發點)
+ 12. mainLoop(ctx)
 ```
 
 ### 5.2 主迴圈（B2 + B6）
@@ -357,10 +394,14 @@ mainLoop:
          emit "sync.failed"   fields={reason}
          continue
      pick := minID( tasks where status==queued )
-     if pick == nil: continue
+     if pick == nil: StateStore.SetRuntimeState(idle); continue
      StateStore.UpdateCurrentTask({task_id=pick.id, started_at=now})
+     StateStore.SetRuntimeState(executing)  ── 進入任務
      Executor.Run(ctx, pick)               ── Stage 2 no-op；Stage 3 交 D03
      StateStore.UpdateCurrentTask({nil, nil})
+     ── runtime_state 不在此覆寫：D03 於執行內以注入的 RuntimeStateSetter 細分
+        executing → verifying → reporting，並於終態設 idle（成功）或 failed（失敗）；
+        D02 僅在下一輪迴圈頂端「無 queued 任務」時設 idle。failed 因此得以保留至下一次 executing。
 ```
 
 ### 5.3 Sync.Tick（B3）

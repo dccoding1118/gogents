@@ -20,10 +20,13 @@ func TestRenderInputMd(t *testing.T) {
 			{Author: "user2", Body: "Comment 1", CreatedAt: time.Now()},
 		},
 	}
-	res := renderInputMd(content, "/tmp/task-1")
+	res := renderInputMd(content, "/tmp/task-1", "myrepo")
 	s := string(res)
 	if !stringsContains(s, "Test Title") || !stringsContains(s, "Comment 1") || !stringsContains(s, "/tmp/task-1") {
 		t.Errorf("rendered content missing fields: %s", s)
+	}
+	if !stringsContains(s, "./myrepo") {
+		t.Errorf("rendered content missing reponame substitution: %s", s)
 	}
 }
 

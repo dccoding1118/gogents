@@ -84,3 +84,17 @@ type Comment struct {
 	CreatedAt time.Time
 	Body      string
 }
+
+// TaskVerifier reports the ticket-declared verification command for a task.
+// Owned by D03 (consumer). github_issue returns ok=false (falls back to the
+// result.json verdict); local reads verify.cmd from the ticket file.
+type TaskVerifier interface {
+	// VerifySpec returns the verify spec and whether one is declared. When ok is
+	// false the caller falls back to the result.json coding verdict (R07).
+	VerifySpec(ctx context.Context, taskID string) (VerifySpec, bool, error)
+}
+
+// VerifySpec is a ticket-declared verification command. Exit code 0 = pass.
+type VerifySpec struct {
+	Cmd string
+}

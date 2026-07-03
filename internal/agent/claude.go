@@ -108,7 +108,8 @@ func (e *claudeExecutor) Run(ctx context.Context, req RunRequest) (RunResult, er
 	if model != "" {
 		args = append(args, "--model", model)
 	}
-	args = append(args,
+	args = append(
+		args,
 		"--dangerously-skip-permissions",
 		"--output-format=stream-json",
 		"--verbose",

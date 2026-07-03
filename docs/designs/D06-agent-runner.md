@@ -65,7 +65,7 @@ graph LR
   - `gemini`：依序檢查 (a) `gemini` 在 PATH 中可執行、(b) `gemini --version` exit 0。
   - `claude`：依序檢查 (a) `claude` 在 PATH 中可執行、(b) `claude --version` exit 0。
   任一失敗回永久錯誤並附人話 reason。10 秒 timeout。**不檢查 model 名稱可用性**。
-- **B2 AgentExecutor.Run — 工作目錄**（Stage 3）：子行程的 cwd 設為 `req.WorkDir`（由 D03 傳入 `<workspace>/<reponame>/`）；不自行 `chdir`、不影響 daemon 行程。
+- **B2 AgentExecutor.Run — 工作目錄**（Stage 3）：子行程的 cwd 設為 `req.WorkDir`（由 D03 傳入 **workspace 根 `<workspace>/`**，使 workspace 級 `.claude/`、`.mcp.json` 生效；repo 為其 `./<reponame>` 子目錄）；本模組**不自行決定路徑**、不 `chdir` daemon 行程、不影響 daemon。
 - **B3 AgentExecutor.Run — I/O 接線**（Stage 3）：
   - **stdin**：以 `O_RDONLY` 開啟 `req.InputPath`，串接至子行程 stdin；EOF 由子行程自行感知。
   - **stdout + stderr**：以 `O_WRONLY|O_CREATE|O_TRUNC` 開啟 `req.OutputPath`，stderr **合併** 導向同一檔（Stage 3 簡化：所有 agent 輸出統一落檔，避免多檔同步問題）。
@@ -144,7 +144,7 @@ type AgentExecutor interface {
 
 type RunRequest struct {
     TaskID     string // 例："github-42"；僅供事件 fields 使用
-    WorkDir    string // 子行程 cwd（R06 Step 4 準備好的 <workspace>/<reponame>/）
+    WorkDir    string // 子行程 cwd = workspace 根 <workspace>/（R06；repo 為其 ./<reponame> 子目錄）
     InputPath  string // 子行程 stdin 來源；呼叫端負責先寫好 input.md
     OutputPath string // 子行程 stdout + stderr 去向；本模組以 O_TRUNC 開檔
     Model      string // cfg.agent.model；由 executor 轉為 CLI 參數
@@ -343,7 +343,7 @@ Run(ctx, req):
 | D06 契約 / 行為          | 由哪個模組的驗收覆蓋 | 預期觀察點                                                                                                                                                                                                                                |
 | ------------------------ | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | B1 AgentProbe.CheckAgent | D02 Stage 2          | 正常：`config.preflight_ok`；卸載 gemini / PATH 移除 → `config.preflight_failed` {stage=agent, reason=lookup}；故意讓 `gemini --version` 失敗（chmod -x）→ {stage=agent, reason=version}                                                  |
-| B2 工作目錄              | D03 Stage 3          | agent 於 `<workspace>/<reponame>/` 下執行（可由 agent 的 `git status` 輸出或 `pwd` 類自檢訊號在 output.jsonl 中觀察）                                                                                                                     |
+| B2 工作目錄              | D03 Stage 3          | agent 於 **workspace 根 `<workspace>/`** 下執行、可讀到 workspace 級 `.claude/` / `.mcp.json`，並於 `./<reponame>` 子目錄操作 git（可由 agent 的 `pwd` / `git status` 自檢訊號在 output.jsonl 中觀察）                                    |
 | B3 I/O 接線              | D03 Stage 3          | 每次執行 `output.jsonl` 被 truncate（先人工塞 garbage → 執行後該 garbage 消失）；agent 看到的 stdin 與 `input.md` bytes 一致                                                                                                              |
 | B4 不設 timeout          | D03 Stage 3          | 長時間 agent 執行不被本模組主動中止；daemon 送 SIGTERM 後才收尾（signaled=true）                                                                                                                                                          |
 | B5 回傳語意              | D03 Stage 3          | agent exit 0 → `task.agent_exited` info、無 error；agent 人工 exit 1 → warning、exit_code=1、**Run 仍回 nil error**（由 D03 決定是否轉 failed）                                                                                           |

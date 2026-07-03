@@ -22,6 +22,10 @@
 | D01-14 | TaskStore      | Transition: 合法狀態轉換 (如 `queued` -> `processing`) | 狀態成功變更，且 patch 欄位正確套用並存檔                 |
 | D01-15 | TaskStore      | Transition: 非法狀態轉換 (如 `queued` -> `done`)       | 回傳 `ErrIllegalTransition` 且不更新 `task.yaml`          |
 | D01-16 | TaskStore      | UpdateFields: 特定欄位更新                             | 成功更新如 `CommentID` 等欄位，且 `Status` 保持不變       |
+| D01-17 | ConfigLoader   | Load: `source.type: local` 設定                       | 正確解析 `source.path` / `filter.label`；`path` 省略時預設 `~/.am/tickets` |
+| D01-18 | GlobalConfigStore | Upsert: 新 workspace 註冊                          | config.yaml `runtimes` 新增一筆 `{name, workspace, registered_at}`，無 `active_runtime` |
+| D01-19 | GlobalConfigStore | Upsert: 同 workspace 路徑重複註冊                  | 以 workspace 為 key 覆蓋更新 `name` / `registered_at`，不新增第二筆 |
+| D01-20 | GlobalConfigStore | Resolve: 以 workspace 路徑或 name 反查            | 路徑精確匹配；同 name 多筆時回 `registered_at` 最近者；未註冊回 `ErrRuntimeNotRegistered` |
 
 ## D02 Daemon-Sync (同步與維護模組)
 
@@ -39,6 +43,10 @@
 | D02-10 | Daemon     | Graceful Shutdown: 收到 SIGTERM                    | 設置 draining 旗標，完成當前 tick 後正常退出                                    |
 | D02-11 | StateStore | Save/Load: `state.yaml` 持久化                     | 原子寫入當前 PID、Sync 時間與當前執行任務 ID                                    |
 | D02-12 | Dispatcher | 選擇 TaskSource 實作                               | 依設定檔中的 `source.type` (如 `github_issue`) 傳回對應的實作物件               |
+| D02-13 | Dispatcher | `source.type: local` 分派                         | 五個 factory 皆傳回 `local` concrete；未支援 type 回明確錯誤                    |
+| D02-14 | StateStore | SetRuntimeState: 原子寫入 `runtime_state`           | state.yaml `runtime_state` 落檔為 `executing` 等；並發寫不交錯                   |
+| D02-15 | Daemon     | Startup: runtime 註冊                             | 啟動時 upsert config.yaml；註冊失敗僅記 `config.register_failed` 不中止啟動     |
+| D02-16 | Daemon     | 主迴圈 runtime_state：無任務 → idle、進入任務 → executing | 主迴圈頂端無 queued 設 `idle`；`Executor.Run` 前設 `executing`            |
 
 ## D03 Task-Execution (任務執行模組)
 
@@ -55,6 +63,11 @@
 | D03-09 | Judge        | judge: 解析各種 `result.json`                             | 驗證 success/failed/missing/parse_error 各種 Verdict 判定正確                                                          |
 | D03-10 | InputBuilder | renderInputMd: 模板渲染                                   | 驗證生成的 `input.md` 包含正確的 Base Prompt 與 Issue 內容/留言                                                        |
 | D03-11 | Runner       | Context 取消處理                                          | 執行中收到取消信號，應立即停止並回傳 `ctx.Err()`，保持任務為 `processing`                                              |
+| D03-12 | Runner       | Run: agent 工作目錄為 workspace 根                        | `RunRequest.WorkDir` = `paths.Root()`；Base Prompt 含 `./<reponame>` 替換後路徑                                       |
+| D03-13 | Runner       | Run: ticket 宣告 verify，exit 0                           | 走 verify 路徑判 CodingSuccess；`runtime_state` 經歷 `verifying`；發 `task.verifying` / `task.verified {pass=true}`      |
+| D03-14 | Runner       | Run: ticket 宣告 verify，exit ≠ 0                         | 判 CodingFailed，`failure_count` +1，回報失敗；`task.verified {pass=false}`                                            |
+| D03-15 | Runner       | Run: 未宣告 verify (github)                               | `VerifySpec` 回 `ok=false`，fallback `result.json` judge (現行行為不變)                                                |
+| D03-16 | Runner       | runtime_state 轉換：executing → verifying → reporting → idle/failed | 透過注入的 `SetRuntimeState` 於各步驟落檔；成功終態 `idle`、失敗終態 `failed`                        |
 
 ## D04 Logger (日誌模組)
 
@@ -99,3 +112,36 @@
 | D06-07 | AgentExecutor | Run: Context 取消 (Graceful Shutdown) | 被取消時子行程應結束，`RunResult` 標記 `Signaled=true` 並回傳 `ctx.Err()`                   |
 | D06-08 | Dispatcher    | NewAgentProbeFromConfig               | 根據 `agent.type` (如 `gemini`, `claude`) 傳回對應的 Probe 實作                             |
 | D06-09 | Dispatcher    | 未支援的 Agent 類型                   | 回傳 `ErrAgentUnsupportedType` 錯誤                                                         |
+| D06-10 | AgentExecutor | Run: 工作目錄為 workspace 根          | `cmd.Dir` = `RunRequest.WorkDir` (workspace 根)；不 chdir daemon 行程                        |
+
+## D07 Local-Source (本地任務源模組)
+
+| 編號   | 測試對象         | 測試情境 (Scenario)                       | 預期結果 (Expected)                                                              |
+| :----- | :--------------- | :---------------------------------------- | :------------------------------------------------------------------------------- |
+| D07-01 | LocalSource      | List: 依 label 過濾 ticket                | 僅回傳 `worker` 等於 `filter.label` 的 ticket，映射為 `SourceTask` (TaskID=ticket id) |
+| D07-02 | LocalSource      | List: 單一 ticket 格式錯誤                | 記 `source.ticket_parse_failed` 並略過該筆，其餘正常回傳                          |
+| D07-03 | LocalSource      | Get: ticket 檔不存在                      | 回 `ErrSourceNotFound` (對應 am 刪除 ticket)                                     |
+| D07-04 | LocalSource      | Get: 讀取/解析失敗                        | 回 `ErrSourceTransient` (保守，下輪重試)                                         |
+| D07-05 | LocalProbe       | CheckSource: `source.path` 不存在/不可讀 | 回 `SourceProbeError`，Preflight 拒啟                                            |
+| D07-06 | LocalFetcher     | Fetch: 由 ticket 組 TaskContent           | Title=`goal`、Body=`context`、Comments 為空                                      |
+| D07-07 | LocalVerifier    | VerifySpec: ticket 宣告/未宣告 verify     | 宣告回 `(Spec{Cmd}, true, nil)`；未宣告回 `(_, false, nil)`                      |
+| D07-08 | LocalReporter    | Report: CodingSuccess 回寫 (code)         | ticket `status: done`、`result: {type: code, pr_url, branch, commit}`、`updated_at` 更新；治理欄位不變 |
+| D07-09 | LocalReporter    | Report: CodingSuccess 無 pr_url (artifacts) | `result: {type: artifacts, items: [...]}`                                     |
+| D07-10 | LocalReporter    | Report: CodingFailed 回寫                 | ticket `status: failed`、寫失敗 result/message                                   |
+| D07-11 | LocalReporter    | Report: 原子寫入與保留未知欄位            | 回寫後 ticket 仍為合法 YAML；`mission` / `depends_on` 等治理欄位原樣保留，無暫存檔殘留 |
+| D07-12 | LocalReporter    | Report: 回寫 IO 失敗                      | 回 `FeedbackFailure`，記 `source.ticket_report_failed`                           |
+
+## D08 Runtime-CLI (註冊與觀測模組)
+
+| 編號   | 測試對象      | 測試情境 (Scenario)                          | 預期結果 (Expected)                                                                 |
+| :----- | :------------ | :------------------------------------------- | :--------------------------------------------------------------------------------- |
+| D08-01 | Register      | start 註冊：新 workspace                     | config.yaml `runtimes` 新增條目；發 `daemon.registered`                             |
+| D08-02 | Register      | start 註冊：同 workspace 路徑重跑            | 以 workspace 為 key 覆蓋更新，不長出重複條目                                        |
+| D08-03 | Register      | 註冊寫入失敗                                 | 記 `config.register_failed` warning，start 不中止                                   |
+| D08-04 | List          | runtime list                                 | 列出所有註冊 runtime；config.yaml 不存在時回空列表 + exit 0                         |
+| D08-05 | Status        | runtime status：daemon 存活                  | 輸出 state.yaml 的 `runtime_state` / `pid` / `current_task` / `last_sync`            |
+| D08-06 | Status        | runtime status：pid 不存活                   | `runtime_state` 覆為 `down`、`alive: false`、exit 0                                  |
+| D08-07 | Status        | runtime status：目標未註冊                   | 回 `ErrRuntimeNotRegistered`、exit ≠ 0                                             |
+| D08-08 | Status        | 以 name 反查、多筆同名                       | 回 `registered_at` 最近者；以 workspace 路徑則精確匹配                              |
+| D08-09 | Logs          | logs：預設與 `--error`                       | 分別回 `daemon.jsonl` / `error.jsonl` 路徑；目標未註冊回錯                          |
+| D08-10 | ReadOnly      | list / status / logs 不改檔                  | 查詢後 config.yaml / state.yaml / task.yaml 的 mtime 不變                           |
