@@ -37,6 +37,13 @@ type Deps struct {
 	Git          gitops.Runner
 	Executor     execution.TaskExecutor
 	AgentProbe   foundation.AgentProbe
+	// StateStore persists state.yaml. Optional: when nil, Run creates its own
+	// from paths.StateYaml(). Injecting the same instance the executor uses lets
+	// runtime_state updates from D03 and D02 share one store.
+	StateStore StateStore
+	// GlobalConfig registers this runtime into ~/.gogents/config.yaml at startup
+	// (R12). Optional: nil skips registration (tests never touch the real home).
+	GlobalConfig foundation.GlobalConfigStore
 }
 
 type daemon struct {
@@ -138,8 +145,32 @@ func (d *daemon) Run(ctx context.Context, workspaceDir string) error {
 		"repo_dir": repoDir,
 	})
 
+	// B1.6b — Register runtime into ~/.gogents/config.yaml (upsert by workspace
+	// path). Non-fatal: config.yaml is an observability aid, not required to run.
+	if d.deps.GlobalConfig != nil {
+		reg := foundation.RuntimeRegistration{
+			Name:         cfg.RuntimeName,
+			Workspace:    workspaceDir,
+			RegisteredAt: foundation.Now().Format(time.RFC3339),
+		}
+		if rErr := d.deps.GlobalConfig.Upsert(reg); rErr != nil {
+			lg.Warning("config.register_failed", "", "failed to register runtime", map[string]any{
+				"workspace": workspaceDir,
+				"reason":    rErr.Error(),
+			})
+		} else {
+			lg.Info("daemon.registered", "", "runtime registered", map[string]any{
+				"workspace": workspaceDir,
+				"name":      cfg.RuntimeName,
+			})
+		}
+	}
+
 	// B1.7 — Load / init state.yaml.
-	stateStore := NewStateStore(paths.StateYaml())
+	stateStore := d.deps.StateStore
+	if stateStore == nil {
+		stateStore = NewStateStore(paths.StateYaml())
+	}
 	state, err := stateStore.Load()
 	if err != nil {
 		lg.Error("daemon.state_corrupt", "", "state.yaml parse error", map[string]any{
@@ -153,6 +184,7 @@ func (d *daemon) Run(ctx context.Context, workspaceDir string) error {
 		StartedAt: foundation.Now(),
 		Workspace: workspaceDir,
 	}
+	state.RuntimeState = foundation.RuntimeIdle
 	if sErr := stateStore.Save(state); sErr != nil {
 		lg.Error("daemon.state_save_failed", "", "failed to save initial state", map[string]any{
 			"reason": sErr.Error(),
@@ -305,10 +337,12 @@ func (d *daemon) runRound(ctx context.Context, syncer Syncer, store foundation.T
 
 	pick := pickNextTask(allTasks)
 	if pick == nil {
+		setRuntimeState(stateStore, lg, foundation.RuntimeIdle)
 		return
 	}
 
-	// Update state: current task.
+	// Update state: current task + runtime_state=executing. Fine-grained
+	// verifying/reporting are set by D03 through the injected setter.
 	taskStartedAt := foundation.Now()
 	if sErr := stateStore.UpdateCurrentTask(func(ct *CurrentTask) {
 		ct.TaskID = pick.ID
@@ -318,6 +352,7 @@ func (d *daemon) runRound(ctx context.Context, syncer Syncer, store foundation.T
 			"reason": sErr.Error(),
 		})
 	}
+	setRuntimeState(stateStore, lg, foundation.RuntimeExecuting)
 
 	// Execute task.
 	d.executeTask(ctx, pick, lg)
@@ -329,6 +364,23 @@ func (d *daemon) runRound(ctx context.Context, syncer Syncer, store foundation.T
 	}); sErr != nil {
 		lg.Error("daemon.state_save_failed", "", "failed to clear current task state", map[string]any{
 			"reason": sErr.Error(),
+		})
+	}
+
+	// Converge runtime_state: failed if the task ended failed, else idle.
+	ws := foundation.RuntimeIdle
+	if finalTask, gErr := store.Get(pick.ID); gErr == nil && finalTask.Status == foundation.StatusFailed {
+		ws = foundation.RuntimeFailed
+	}
+	setRuntimeState(stateStore, lg, ws)
+}
+
+// setRuntimeState writes runtime_state, logging (not failing) on error.
+func setRuntimeState(stateStore StateStore, lg logger.Logger, ws foundation.RuntimeState) {
+	if sErr := stateStore.SetRuntimeState(ws); sErr != nil {
+		lg.Error("daemon.state_save_failed", "", "failed to save runtime_state", map[string]any{
+			"runtime_state": string(ws),
+			"reason":        sErr.Error(),
 		})
 	}
 }

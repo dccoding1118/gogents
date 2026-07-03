@@ -79,9 +79,11 @@ func (p *defaultWorkspacePaths) Init() error {
 func (p *defaultWorkspacePaths) Hash() string    { return p.hash }
 func (p *defaultWorkspacePaths) Root() string    { return p.workspaceDir }
 func (p *defaultWorkspacePaths) Gogents() string { return filepath.Join(p.workspaceDir, ".gogents") }
+
 func (p *defaultWorkspacePaths) RuntimeYaml() string {
 	return filepath.Join(p.Gogents(), "runtime.yaml")
 }
+
 func (p *defaultWorkspacePaths) StateYaml() string { return filepath.Join(p.Gogents(), "state.yaml") }
 func (p *defaultWorkspacePaths) TasksDir() string  { return filepath.Join(p.Gogents(), "tasks") }
 
@@ -105,6 +107,9 @@ func (p *defaultWorkspacePaths) ResultJson(id string) string {
 func (p *defaultWorkspacePaths) GlobalConfigYaml() string {
 	return filepath.Join(p.globalHome, "config.yaml")
 }
-func (p *defaultWorkspacePaths) LogsDir() string   { return filepath.Join(p.globalHome, "logs", p.hash) }
+
+func (p *defaultWorkspacePaths) LogsDir() string { return filepath.Join(p.globalHome, "logs", p.hash) }
+
 func (p *defaultWorkspacePaths) DaemonLog() string { return filepath.Join(p.LogsDir(), "daemon.jsonl") }
-func (p *defaultWorkspacePaths) ErrorLog() string  { return filepath.Join(p.LogsDir(), "error.jsonl") }
+
+func (p *defaultWorkspacePaths) ErrorLog() string { return filepath.Join(p.LogsDir(), "error.jsonl") }

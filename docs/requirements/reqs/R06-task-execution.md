@@ -56,14 +56,19 @@ input.md 寫入 `<workspace>/.gogents/tasks/<task-id>/input.md`。內容由兩�
 
 ```text
 You are a coding agent running inside a prepared workspace.
+Your current working directory is the workspace root. The git
+repository to work in is the `./<reponame>` subdirectory; run all
+git and build commands there. Workspace-level configuration
+(`.claude/`, `.mcp.json`) applies to you from the working directory.
 
 ## Project Context
-Read `AGENTS.md` at the repository root before starting. It describes
-the project conventions, architecture, and constraints you must follow.
+Read `AGENTS.md` at the repository root (`./<reponame>/AGENTS.md`)
+before starting. It describes the project conventions, architecture,
+and constraints you must follow.
 
 ## Task Workflow
-1. Implement the task described in the "Task Content" section below
-   on the current git branch.
+1. Change into `./<reponame>` and implement the task described in the
+   "Task Content" section below on the current git branch.
 2. Commit with message format: `<type>: #<issue-number> <description>`.
    Allowed types: feat, fix, chore, docs, refactor, test.
 3. Push the branch: `git push origin <current-branch>`.
@@ -81,6 +86,8 @@ language as-is, do not translate.
 
 ---
 ```
+
+`<reponame>` 由 daemon 依 `project.repo.url` 推得後替入(比照 `<absolute-task-dir>`);其餘為固定指令,使用者不可覆寫。
 
 ### 區塊 2:Task Content(原始任務內容,語言原樣)
 
@@ -127,7 +134,7 @@ Git 操作失敗:task 轉為 `failed`,`failure_count` +1,寫入 error 日誌,跳
 
 由 agent executor 依 `agent.type` 決定實際呼叫方式。目前版本實作 `gemini` 與 `claude`,executor 內部負責:
 
-- 工作目錄設為 `<workspace>/<reponame>/`
+- 工作目錄設為 **workspace 根** `<workspace>/`,repo 以子目錄 `./<reponame>` 提供給 agent
 - 將 input.md 的內容透過 stdin 傳給 agent CLI
 - 以對應的模型參數呼叫 agent CLI(參數來自 runtime.yaml 的 `agent.model`)
 - agent 的 stdout 重導到 `<task-dir>/output.jsonl`(truncate 後 append)
@@ -141,6 +148,17 @@ Git 操作失敗:task 轉為 `failed`,`failure_count` +1,寫入 error 日誌,跳
 - Agent 結束後:
   - 寫入 `task.agent_exited` 事件,fields 含 exit code、持續時間
   - 交給 R07 處理結果
+
+## 工作目錄與 workspace 專長配置
+
+agent 子行程的工作目錄為 **workspace 根** `<workspace>/`,而非 repo 目錄。目的是讓 workspace 級的專長配置被 agent 載入:
+
+- `<workspace>/.claude/CLAUDE.md`、`<workspace>/.claude/skills/`:該 worker 專長的 rules 與 skills
+- `<workspace>/.mcp.json`:該 worker 的 MCP 工具白名單
+
+repo 以子目錄 `./<reponame>` 提供給 agent;Base Prompt(區塊 1)指明 repo 相對路徑,agent 於該子目錄進行 git commit / push / 開 PR。
+
+daemon 自身的 git 準備(Step 4 的 `git fetch` / `checkout -B`)仍以顯式 repo 路徑 `<workspace>/<reponame>/` 執行,不受 agent 工作目錄變更影響。
 
 ## 檔案職責重申
 
@@ -169,3 +187,4 @@ Git 操作失敗:task 轉為 `failed`,`failure_count` +1,寫入 error 日誌,跳
 - R07 - 結果處理(本需求結束後的下一棒)
 - R09 - 日誌規範(task.* 事件)
 - R10 - 錯誤處理(git / agent 失敗的統一處理)
+- R11 - 本地任務源(`local` 型別的 issue 內容以 ticket 檔組裝 input.md)

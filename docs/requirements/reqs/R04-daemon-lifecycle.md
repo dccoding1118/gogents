@@ -24,13 +24,14 @@ Daemon 啟動時依序執行以下步驟,任一步驟失敗即中止啟動並以
 2. **讀取 runtime.yaml**:位置為 `<workspace>/.gogents/runtime.yaml`,找不到則報錯
 3. **驗證 runtime.yaml**:依 R02 定義的驗證規則檢查所有欄位
 4. **初始化日誌目錄**:建立 `~/.gogents/logs/<workspace-hash>/`,開啟 daemon.jsonl 與 error.jsonl 寫入控制代碼(見 R09)
-5. **檢查/建立 repo 目錄**:
+5. **註冊 runtime**:將本 runtime 以 workspace 路徑為 key 寫入(upsert)`~/.gogents/config.yaml`(見 R12);與初始化日誌同屬啟動期的全域註冊動作。寫入失敗僅記 error、不中止啟動(config.yaml 為觀測輔助,非執行必要)
+6. **檢查/建立 repo 目錄**:
    - 若 `<workspace>/<reponame>/` 不存在:執行 `git clone <repo.url> <reponame>`
    - 若已存在且為有效 git repo:執行 `git fetch origin`
    - 若已存在但非 git repo:中止啟動並報錯
-6. **載入 state.yaml**:若不存在則建立空白預設內容
-7. **重啟恢復**:掃描所有 task 目錄,將狀態為 `processing` 的任務重置為 `queued` 並寫入 warning 日誌
-8. **進入主迴圈**:開始 sync 與 task 執行循環
+7. **載入 state.yaml**:若不存在則建立空白預設內容,`runtime_state` 初始化為 `idle`
+8. **重啟恢復**:掃描所有 task 目錄,將狀態為 `processing` 的任務重置為 `queued` 並寫入 warning 日誌
+9. **進入主迴圈**:開始 sync 與 task 執行循環,`runtime_state` 依階段更新
 
 ## state.yaml 格式
 
@@ -43,6 +44,8 @@ daemon:
   started_at: "2026-04-07T10:00:00Z"
   workspace: "/Users/me/projects/my-workspace"
 
+runtime_state: "idle"                # idle | executing | verifying | reporting | failed | broken
+
 sync:
   last_sync_at: "2026-04-07T10:05:00Z"
   last_sync_status: "success"       # success | failed
@@ -54,6 +57,24 @@ current_task:
 ```
 
 state.yaml 採用原子寫入(寫入臨時檔後 rename),避免 daemon 崩潰導致檔案損毀。
+
+## runtime_state 顯式狀態
+
+`runtime_state` 是 daemon 的顯式執行階段,供觀測 CLI(R12)與 am 直接讀取,免於由 `current_task` + `sync` 欄位間接推導。daemon 於各階段主動更新:
+
+| 值           | 語義                                             | 進入時機                          |
+| ------------ | ------------------------------------------------ | --------------------------------- |
+| `idle`       | 無進行中任務,等待下一輪 sync                     | 啟動完成、任務收斂後              |
+| `executing`  | 正在執行任務的 coding 階段(呼叫 agent CLI)      | 任務轉 processing、呼叫 agent 期間 |
+| `verifying`  | 正在執行 ticket 宣告的 `verify` 驗證             | agent 結束後跑 verify 指令期間(見 R11) |
+| `reporting`  | 正在回寫結果到任務來源                           | 執行 feedback 回報期間            |
+| `failed`     | 最近一次任務以失敗收斂                           | 任務轉 failed 後,至下輪重新 executing 前 |
+| `broken`     | daemon 偵測到自身無法繼續(啟動後不變量破壞等)   | 內部異常時                        |
+
+- `runtime_state` 與 task 的 `status`(R03)不同層級:前者描述 **daemon 當下在做什麼**,後者描述 **單一任務的命運**
+- **`down` 不落檔**:daemon 行程不存在時的狀態由查詢端(R12 `runtime status`)依 pid 不存在推得,不寫入 state.yaml(死掉的 daemon 無法自己寫)
+- 更新採 state.yaml 原子寫入
+- **命名**:gogents 的執行單位是 **runtime**(daemon＋workspace),故欄位為 `runtime_state`。am 在其分層稱同一實體為 **worker**(am §2.1 worker↔runtime 對應);am 透過 `gogents runtime status` 查得後於自身層對應為 worker 狀態
 
 ## 主迴圈
 
@@ -108,3 +129,5 @@ Daemon 啟動時掃描 `<workspace>/.gogents/tasks/*/task.yaml`:
 - R05 - GitHub Issue 同步(主迴圈呼叫)
 - R06 - 任務執行流程(主迴圈呼叫、分支重置行為)
 - R09 - 日誌規範(啟動、關閉、重啟事件的日誌寫入)
+- R11 - 本地任務源(`verifying` 階段對應 ticket verify)
+- R12 - Runtime 註冊與觀測(啟動註冊、`runtime_state` / pid 查詢)

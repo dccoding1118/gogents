@@ -107,6 +107,70 @@ type mockSourceProbe struct{ err error }
 
 func (m *mockSourceProbe) CheckSource() error { return m.err }
 
+type mockGlobalConfig struct {
+	upserts []foundation.RuntimeRegistration
+}
+
+func (m *mockGlobalConfig) Load() (foundation.GlobalConfig, error) {
+	return foundation.GlobalConfig{}, nil
+}
+
+func (m *mockGlobalConfig) Upsert(r foundation.RuntimeRegistration) error {
+	m.upserts = append(m.upserts, r)
+	return nil
+}
+
+func (m *mockGlobalConfig) Resolve(string) (foundation.RuntimeRegistration, error) {
+	return foundation.RuntimeRegistration{}, nil
+}
+
+// TestDaemon_RegistrationAndRuntimeState covers D02-15 (startup registers the
+// runtime) and D02-16 (runtime_state is initialised to idle).
+func TestDaemon_RegistrationAndRuntimeState(t *testing.T) {
+	tmpDir := t.TempDir()
+	repoDir := filepath.Join(tmpDir, "repo")
+	_ = os.MkdirAll(filepath.Join(repoDir, ".git"), 0o750)
+
+	cfg := foundation.Config{RuntimeName: "worker-a"}
+	cfg.Project.Repo.URL = "https://gh.com/u/repo"
+	cfg.Source.SyncInterval = 10 * time.Millisecond
+
+	mgc := &mockGlobalConfig{}
+	stateStore := NewStateStore(filepath.Join(tmpDir, "state.yaml"))
+
+	deps := Deps{
+		ConfigLoader: &mockConfigLoader{loadRes: cfg},
+		NewPaths:     func(ws string) foundation.WorkspacePaths { return &mockPaths{ws: ws} },
+		NewStore:     func(p foundation.WorkspacePaths) foundation.TaskStore { return &mockStore{} },
+		Logger:       &mockLogger{},
+		Source:       &mockSource{},
+		SourceProbe:  &mockSourceProbe{},
+		Git:          &mockGit{},
+		Executor:     &mockExecutor{},
+		AgentProbe:   &mockAgentProbe{},
+		StateStore:   stateStore,
+		GlobalConfig: mgc,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- New(deps).Run(ctx, tmpDir) }()
+	<-errCh
+
+	if len(mgc.upserts) == 0 {
+		t.Fatal("D02-15 expected runtime registration upsert")
+	}
+	if mgc.upserts[0].Workspace != tmpDir || mgc.upserts[0].Name != "worker-a" {
+		t.Errorf("registration mismatch: %+v", mgc.upserts[0])
+	}
+
+	st, _ := stateStore.Load()
+	if st.RuntimeState != foundation.RuntimeIdle {
+		t.Errorf("D02-16 expected runtime_state idle, got %q", st.RuntimeState)
+	}
+}
+
 func TestResolveRepoDir(t *testing.T) {
 	dir, err := resolveRepoDir("/tmp", "https://github.com/user/gogents.git")
 	if err != nil {

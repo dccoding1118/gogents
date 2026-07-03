@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,14 +23,16 @@ import (
 // All fields must be non-nil; nil is treated as a programmer error and is
 // the responsibility of the CLI startup code, not validated here.
 type Deps struct {
-	Store          foundation.TaskStore
-	Paths          foundation.WorkspacePaths
-	Config         foundation.Config
-	Logger         logger.Logger
-	ContentFetcher source.TaskContentFetcher
-	Git            gitops.TaskBranchRunner
-	Agent          agent.AgentExecutor
-	Feedback       source.FeedbackReporter
+	Store           foundation.TaskStore
+	Paths           foundation.WorkspacePaths
+	Config          foundation.Config
+	Logger          logger.Logger
+	ContentFetcher  source.TaskContentFetcher
+	Verifier        source.TaskVerifier // ticket-declared verify (github: ok=false)
+	Git             gitops.TaskBranchRunner
+	Agent           agent.AgentExecutor
+	Feedback        source.FeedbackReporter
+	SetRuntimeState func(foundation.RuntimeState) // injected by D02; nil in tests/noop
 }
 
 // New returns the production TaskExecutor. The Stage 2 noop variant remains
@@ -38,14 +41,24 @@ type Deps struct {
 func New(deps Deps) TaskExecutor {
 	repoDir := deriveRepoDir(deps.Paths.Root(), deps.Config.Project.Repo.URL)
 	return &runner{
-		deps:    deps,
-		repoDir: repoDir,
+		deps:     deps,
+		repoDir:  repoDir,
+		reponame: filepath.Base(repoDir),
 	}
 }
 
 type runner struct {
-	deps    Deps
-	repoDir string
+	deps     Deps
+	repoDir  string
+	reponame string
+}
+
+// setRuntimeState updates the daemon's runtime_state via the injected setter,
+// which writes state.yaml (owned by D02). No-op when unset (tests / noop).
+func (r *runner) setRuntimeState(ws foundation.RuntimeState) {
+	if r.deps.SetRuntimeState != nil {
+		r.deps.SetRuntimeState(ws)
+	}
 }
 
 func (r *runner) Run(ctx context.Context, task foundation.Task) error {
@@ -120,7 +133,7 @@ func (r *runner) Run(ctx context.Context, task foundation.Task) error {
 	})
 
 	// Step 3: write input.md.
-	inputBytes := renderInputMd(content, taskDir)
+	inputBytes := renderInputMd(content, taskDir, r.reponame)
 	inputPath := r.deps.Paths.InputMd(task.ID)
 	if wErr := os.WriteFile(inputPath, inputBytes, 0o644); wErr != nil { //nolint:gosec // workspace path
 		lg.Warning("task.input_write_failed", task.ID, "failed to write input.md", map[string]any{
@@ -172,10 +185,11 @@ func (r *runner) Run(ctx context.Context, task foundation.Task) error {
 		"base":    base,
 	})
 
-	// Step 5: invoke agent.
+	// Step 5: invoke agent. WorkDir is the workspace root (not the repo dir) so
+	// workspace-level .claude/ and .mcp.json apply; the repo is ./<reponame>.
 	res, agErr := r.deps.Agent.Run(ctx, agent.RunRequest{
 		TaskID:     task.ID,
-		WorkDir:    r.repoDir,
+		WorkDir:    r.deps.Paths.Root(),
 		InputPath:  inputPath,
 		OutputPath: r.deps.Paths.OutputJsonl(task.ID),
 		Model:      cfg.Agent.Model,
@@ -192,10 +206,92 @@ func (r *runner) Run(ctx context.Context, task foundation.Task) error {
 		return nil
 	}
 
+	// Step 5.5: verify (when the ticket declares verify.cmd; otherwise fall back
+	// to the result.json verdict in Step 6).
+	if v, ok := r.verifyVerdict(ctx, task, res.ExitCode); ok {
+		if v.Case == verdictCanceled {
+			return ctx.Err()
+		}
+		r.finalize(ctx, task, v.verdict, res.ExitCode)
+		return nil
+	}
+
 	// Step 6: judge result.json + finalize.
 	verdict := judge(r.deps.Paths.ResultJson(task.ID))
 	r.finalize(ctx, task, verdict, res.ExitCode)
 	return nil
+}
+
+// verifyStep carries the outcome of Step 5.5. Case==verdictCanceled signals the
+// caller to return ctx.Err(); otherwise verdict is ready for finalize.
+type verifyStep struct {
+	verdict Verdict
+	Case    int
+}
+
+const verdictCanceled = 1
+
+// verifyVerdict runs the ticket-declared verify command (if any) in the
+// workspace root and derives a coding verdict from its exit code. Returns
+// ok=false when no verify is declared (Step 6 fallback path).
+func (r *runner) verifyVerdict(ctx context.Context, task foundation.Task, _ int) (verifyStep, bool) {
+	lg := r.deps.Logger
+	if r.deps.Verifier == nil {
+		return verifyStep{}, false
+	}
+	spec, has, err := r.deps.Verifier.VerifySpec(ctx, task.ID)
+	if err != nil || !has {
+		// No verify declared (or unreadable) → fall back to result.json.
+		return verifyStep{}, false
+	}
+
+	r.setRuntimeState(foundation.RuntimeVerifying)
+	lg.Info("task.verifying", task.ID, "running ticket verify", map[string]any{
+		"task_id": task.ID,
+		"cmd":     spec.Cmd,
+	})
+
+	code := runVerify(ctx, r.deps.Paths.Root(), spec.Cmd)
+	if ctx.Err() != nil {
+		lg.Warning("task.canceled", task.ID, "task canceled during verify", map[string]any{
+			"task_id": task.ID, "step": "verify",
+		})
+		return verifyStep{Case: verdictCanceled}, true
+	}
+
+	pass := code == 0
+	lg.Info("task.verified", task.ID, "verify finished", map[string]any{
+		"task_id":   task.ID,
+		"exit_code": code,
+		"pass":      pass,
+	})
+
+	// pr_url / message come from result.json (best effort) for the report payload.
+	rj := judge(r.deps.Paths.ResultJson(task.ID))
+	if pass {
+		return verifyStep{verdict: Verdict{Case: VerdictCodingSuccess, PrURL: rj.PrURL, Message: rj.Message}}, true
+	}
+	msg := fmt.Sprintf("verify failed: exit %d", code)
+	if rj.Message != "" {
+		msg = msg + "; " + rj.Message
+	}
+	return verifyStep{verdict: Verdict{Case: VerdictCodingFailed, Message: msg}}, true
+}
+
+// runVerify executes the verify command via `sh -c` in workDir and returns its
+// exit code. A command that cannot be started is treated as a failure (-1).
+func runVerify(ctx context.Context, workDir, cmd string) int {
+	//nolint:gosec // cmd is the ticket-declared verify command; running it is the point.
+	c := exec.CommandContext(ctx, "sh", "-c", cmd)
+	c.Dir = workDir
+	if err := c.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode()
+		}
+		return -1
+	}
+	return 0
 }
 
 // finalize converges task state per Verdict (D03 §5.3).
@@ -222,6 +318,7 @@ func (r *runner) finalize(ctx context.Context, task foundation.Task, v Verdict, 
 		}
 
 		// Then: call FeedbackReporter.
+		r.setRuntimeState(foundation.RuntimeReporting)
 		issueN, _ := parseIssueNumber(task.ID)
 		out := r.deps.Feedback.Report(ctx, source.FeedbackInput{
 			TaskID:      task.ID,
@@ -327,6 +424,7 @@ func (r *runner) finalize(ctx context.Context, task foundation.Task, v Verdict, 
 		// Notify R08; status stays failed regardless of feedback outcome (B8),
 		// but persist label / comment movement so task.yaml stays consistent
 		// with the GitHub side and the next sync round can detect re-trigger.
+		r.setRuntimeState(foundation.RuntimeReporting)
 		issueN, _ := parseIssueNumber(task.ID)
 		fbOut := r.deps.Feedback.Report(ctx, source.FeedbackInput{
 			TaskID:       task.ID,

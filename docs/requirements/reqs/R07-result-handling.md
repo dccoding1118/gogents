@@ -30,10 +30,36 @@
 | `pr_url`   | string | success 必填   | Agent 開立的 PR 網址                             |
 | `message`  | string | 是             | 執行摘要(success)或失敗原因(failed)          |
 
+## 驗證方式:verify 與 fallback
+
+coding 階段成敗的判定有兩條路徑,擇一:
+
+### 路徑 A:ticket 宣告 `verify`(僅 `source.type: local`)
+
+am 的 ticket 可宣告驗證指令:
+
+```yaml
+verify:
+  cmd: "pytest tests/…"        # exit code 0 = pass,非 0 = fail
+  # 可選 expected artifacts 檢查
+```
+
+- daemon 於 agent 結束後,在 workspace 內執行 `verify.cmd`
+- **exit code 0 → coding 成功(pass);非 0 → coding 失敗(fail)**
+- verify 執行期間 `runtime_state` 為 `verifying`(見 R04)
+- pr_url / message 仍取自 result.json(供回報 payload);local 結果型別(`code` / `artifacts`)與回寫細節見 R11
+- verify 指令本身無法啟動(檔案不存在、無執行權限等)視為 coding 失敗
+
+### 路徑 B:未宣告 verify(fallback,現行 coding verdict)
+
+`github_issue` 型別、或 `local` ticket 未宣告 `verify` 時,沿用現行判定:讀 `result.json` 的 `status` / `pr_url`(下述「Coding 階段判定」Case A–D)。此為向後相容的預設路徑,`github_issue` 流程完全不受影響。
+
 ## 處理流程
 
 ```text
-1. 讀取 <task-dir>/result.json
+0. 若 ticket 宣告 verify:於 workspace 執行 verify.cmd,exit code 決定 coding 成敗
+   否則:讀取 <task-dir>/result.json 判定 coding 成敗
+1. 讀取 <task-dir>/result.json(取 pr_url / message 供回報)
 2. 判定 coding 階段成敗
 3. 若 coding 成功(達斷點):
    a. 先更新 task.yaml 的 execution.pr_url、finished_at
@@ -49,6 +75,8 @@
 ```
 
 ## Coding 階段判定
+
+下述 Case A–D 為**路徑 B(未宣告 verify)**的權威判定規則。當 ticket 宣告 `verify`(路徑 A)時,coding 成敗改由 verify 的 exit code 決定:exit 0 走 Case A 收斂(仍讀 result.json 取 pr_url;pr_url 缺失時 local 以 `artifacts` 結果回報,見 R11),非 0 走 Case B 收斂。result.json 缺失/解析失敗在路徑 A 下不影響成敗判定,但會使回報 payload 缺 pr_url。
 
 ### Case A:result.json 存在、可解析、status=success 且 pr_url 存在
 
@@ -135,3 +163,4 @@ R08 回傳:
 - R08 - GitHub 狀態回報(後一棒,回傳成敗決定 done 或 reporting)
 - R09 - 日誌規範(task.completed / task.failed / task.reporting_failed 事件)
 - R10 - 錯誤處理
+- R11 - 本地任務源(verify 宣告來源、local 結果型別與回寫)

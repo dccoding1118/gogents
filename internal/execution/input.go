@@ -9,17 +9,24 @@ import (
 )
 
 // basePromptTemplate is the fixed English block that wraps the task content
-// (D03 §3.2). The single placeholder `<absolute-task-dir>` is rendered by
-// straight string replacement; no conditional logic, no nested templates.
+// (D03 §3.2). The placeholders `<absolute-task-dir>` and `<reponame>` are
+// rendered by straight string replacement; no conditional logic, no nested
+// templates. The agent's working directory is the workspace root, so the repo
+// lives in the `./<reponame>` subdirectory.
 const basePromptTemplate = `You are a coding agent running inside a prepared workspace.
+Your current working directory is the workspace root. The git
+repository to work in is the ` + "`./<reponame>`" + ` subdirectory; run all
+git and build commands there. Workspace-level configuration
+(` + "`.claude/`, `.mcp.json`" + `) applies to you from the working directory.
 
 ## Project Context
-Read ` + "`AGENTS.md`" + ` at the repository root before starting. It describes
-the project conventions, architecture, and constraints you must follow.
+Read ` + "`AGENTS.md`" + ` at the repository root (` + "`./<reponame>/AGENTS.md`" + `)
+before starting. It describes the project conventions, architecture,
+and constraints you must follow.
 
 ## Task Workflow
-1. Implement the task described in the "Task Content" section below
-   on the current git branch.
+1. Change into ` + "`./<reponame>`" + ` and implement the task described in the
+   "Task Content" section below on the current git branch.
 2. Commit with message format: ` + "`<type>: #<issue-number> <description>`" + `.
    Allowed types: feat, fix, chore, docs, refactor, test.
 3. Push the branch: ` + "`git push origin <current-branch>`" + `.
@@ -39,10 +46,11 @@ language as-is, do not translate.
 `
 
 // renderInputMd builds the input.md content. The output starts with the base
-// prompt (with absolute-task-dir substituted), then a separator, then the
-// "Task Content" section assembled from the fetched issue (D03 §3.2).
-func renderInputMd(content source.TaskContent, absTaskDir string) []byte {
+// prompt (with absolute-task-dir and reponame substituted), then a separator,
+// then the "Task Content" section assembled from the fetched issue (D03 §3.2).
+func renderInputMd(content source.TaskContent, absTaskDir, reponame string) []byte {
 	base := strings.ReplaceAll(basePromptTemplate, "<absolute-task-dir>", absTaskDir)
+	base = strings.ReplaceAll(base, "<reponame>", reponame)
 
 	var b strings.Builder
 	b.WriteString(base)

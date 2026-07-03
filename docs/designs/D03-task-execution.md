@@ -56,7 +56,10 @@ graph LR
 | D04 logger                                         | 全量                                                                                                                                                                                                                                                                                                                                                                                  | D04 §4                                                                        |
 | D05 `TaskContentFetcher` 實作（GitHub Issue 版本） | 取得 issue body + comments；錯誤分類沿用 `ErrSourceNotFound` / `ErrSourceAuth` / `ErrSourceTransient`                                                                                                                                                                                                                                                                                 | 介面本文件 §4.3；實作由 D05 於 `github` 子包補 `NewGitHubIssueContentFetcher` |
 | D05 `FeedbackReporter` 實作                        | 全量（`TaskCreated` 由 D02 Syncer 呼叫；本模組呼叫 `CodingSuccess` / `CodingFailed`）                                                                                                                                                                                                                                                                                                 | D05 §4.3、§5.5                                                                |
-| D05 dispatcher                                     | 補一個 `NewTaskContentFetcherFromConfig`（依 `cfg.source.type` 選 concrete）                                                                                                                                                                                                                                                                                                          | D02 §4.4 factory 表新增一列                                                   |
+| D05 dispatcher                                     | `NewTaskContentFetcherFromConfig` + `NewTaskVerifierFromConfig`（依 `cfg.source.type` 選 concrete）                                                                                                                                                                                                                                                                                   | D02 §4.4 factory 群                                                          |
+| source `TaskVerifier` 實作                         | 取 ticket-declared `verify.cmd`；`github_issue` 回 `ok=false`（走 result.json fallback），`local` 讀 ticket 檔                                                                                                                                                                                                                                                                        | 介面本文件 §4.6；github 實作 D05、local 實作 D07                              |
+| D07 `local` concrete（ContentFetcher / FeedbackReporter / Verifier） | `source.type: local` 時的內容組裝、終態回寫 ticket、verify.cmd 讀取                                                                                                                                                                                                                                                                                          | D07                                                                          |
+| D02 `RuntimeStateSetter` 注入                       | `func(daemon.RuntimeState)`：D03 於 verify / feedback / 終態更新 `runtime_state`，不直接開 state.yaml                                                                                                                                                                                                                                                                                   | D02 §4.5 `StateStore.SetRuntimeState`；於組 `Deps` 時注入                      |
 | D06 `AgentExecutor` 實作                           | 全量（Gemini 或 Claude Code concrete 提供 `Run`）                                                                                                                                                                                                                                                                                                                                     | D06 §4.2、§4.3、§4.5                                                          |
 | gitops runner                                      | `Fetch` / `CheckoutBranch` 兩個 method；不含 clone（clone 屬 D02 啟動期責任）                                                                                                                                                                                                                                                                                                         | 本文件 §4.4                                                                   |
 | 啟動期組裝                                         | `execution.TaskExecutor` 實例由 CLI 入口（`cmd/gogents`）以 `execution.New(Deps{...})` 組裝後傳入 D02 `Deps.Executor`；其內部 deps（`ContentFetcher` / `FeedbackReporter` / `AgentExecutor` / `Git`）由 CLI 入口呼叫各模組 dispatcher 後填入。**D02 不認識** 這些內部欄位，其 `Deps` 結構維持 D02 §4.1 原樣                                                                           | 本文件 §4.2 Deps；D02 §4.1 不變                                               |
@@ -73,16 +76,19 @@ graph LR
   - Task Content 的 `<issue-url>` / `<issue-title>` / `<issue-author>` / `<issue-body>` / 每條 comment 皆**原樣**帶入（不翻譯、不改寫）
   - 寫入成功後才進下一步；失敗走任務級錯誤處理
 - **B5 Git 分支準備契約**
-  - 工作目錄固定為 `paths.Root() / <reponame>`；不接受呼叫端覆寫
+  - git 指令工作目錄固定為 repo 路徑 `paths.Root() / <reponame>`；不接受呼叫端覆寫（agent 工作目錄另見 B6，兩者不同）
   - 執行 `git fetch origin` 再 `git checkout -B task/<task-id> origin/<cfg.project.repo.branch>`
   - 兩指令任一失敗即視為 git 準備失敗；不重試（R10：任務級操作屬 D03 自身策略，目前不重試）
   - 成功後 `task.yaml.execution.branch` 在 B1→B3 的 Step 1 已設為 `task/<task-id>`；本步僅確認分支於真實 repo 已就位
 - **B6 Agent 呼叫契約**
   - 唯一入口：`D06.AgentExecutor.Run(ctx, RunRequest{...})`
-  - `WorkDir` / `InputPath` / `OutputPath` / `Model` 皆由本模組依 `paths` 與 `cfg` 填入；不透給呼叫端
-  - agent exit code ≠ 0 **不代表** 任務失敗；成敗判定以 `result.json` 為準（R07 Case A–D）
+  - **`WorkDir` 為 workspace 根 `paths.Root()`**（非 repo 目錄）——使 workspace 級 `.claude/CLAUDE.md`、`.claude/skills/`、`.mcp.json` 專長配置被 agent 載入；repo 以子目錄 `./<reponame>` 提供，Base Prompt 指示 agent 於該子目錄進行 git / build。此變更**不影響** B5 的 git 準備（daemon 仍以顯式 repoDir 操作 git）
+  - `InputPath` / `OutputPath` / `Model` 皆由本模組依 `paths` 與 `cfg` 填入；不透給呼叫端
+  - agent exit code ≠ 0 **不代表** 任務失敗；成敗判定以 verify（B7a）或 `result.json`（R07 Case A–D）為準
   - `ErrAgentSpawn` / `ErrAgentIO` 視為任務級失敗；`ctx.Err()` 視為 daemon-level 取消（B1 第 i 項）
-- **B7 結果判定契約**：以 R07 §「Coding 階段判定」四個 Case 為權威規則。result.json 不存在 / 解析失敗 / 必填欄位缺失 / `status` 非預期值 / `status=success` 但 `pr_url` 為空，皆視為 Case C（coding 失敗），`task.failed` 的 `reason` 欄位依來源明確標示類別。
+- **B7 結果判定契約**：以 R07 §「Coding 階段判定」四個 Case 為權威規則（fallback 路徑）。result.json 不存在 / 解析失敗 / 必填欄位缺失 / `status` 非預期值 / `status=success` 但 `pr_url` 為空，皆視為 Case C（coding 失敗），`task.failed` 的 `reason` 欄位依來源明確標示類別。
+- **B7a verify 判定契約（ticket 宣告 verify 時）**：source 提供 ticket-declared `verify.cmd` 時（目前僅 `local`，經 `TaskVerifier` 取得，§4.6），於 agent 結束後在 **workspace 根**執行該指令，以 exit code 判 coding 成敗（exit 0 → 走 Case A 收斂；非 0 → 走 Case B 收斂）。verify 期間經 `RuntimeStateSetter` 設 `runtime_state=verifying`。pr_url / message 仍取自 result.json 供回報 payload；result.json 缺失在 verify 路徑下不改變成敗、僅使 payload 缺 pr_url（local 以 `artifacts` result 回報，見 D07）。**未宣告 verify 時 fallback B7**，`github_issue` 流程完全不受影響。
+- **B12 runtime_state 更新契約**：本模組透過 D02 注入的 `RuntimeStateSetter`（§4.2 Deps）更新細粒度 `runtime_state`——進入 verify 前設 `verifying`、進入 feedback 前設 `reporting`、任務終態設 `idle`（成功）或 `failed`（失敗）。本模組**不直接開啟 state.yaml**（維持 §1「不觸碰 state.yaml」），僅呼叫 setter；setter 內部為 D02 `StateStore.SetRuntimeState` 的原子寫入。
 - **B8 回報收斂契約**
   - `CodingSuccess`（Case A）：**先**以 `TaskStore.Transition(processing → reporting)` 把 `execution.pr_url` / `finished_at` 落到 `task.yaml`；**再**呼 `FeedbackReporter.Report`；依 `FeedbackOutcome.Result` 決定最終：`success` → `Transition(reporting → done)`，回填 `comment_id` / `last_label`；`failure` → 狀態維持 `reporting`，以 `TaskStore.UpdateFields` 寫入 `comment_id` / `last_label`（部分成功值）與 `execution.reporting_error`（**不**再呼 `Transition`，避免自我轉換；走 D01 §2 B6 同狀態欄位更新路徑）
   - `CodingFailed`（Case B / C / D）：先 `Transition(processing → failed)` 並 `failure_count` +1、設 `finished_at`；再呼 `FeedbackReporter.Report`（`Trigger=CodingFailed`，帶本次 `failure_count` 與 `cfg.TaskPolicy.MaxFailures`）；無論 R08 成敗皆**不**再改 task status（已是 `failed` 終點）
@@ -100,10 +106,12 @@ graph LR
 | 名稱          | 型別   | 來源                                                                           |
 | ------------- | ------ | ------------------------------------------------------------------------------ |
 | `taskDir`     | string | `paths.TaskDir(task.ID)`                                                       |
-| `repoDir`     | string | `paths.Root() + "/" + reponame(cfg.Project.Repo.URL)`                          |
+| `workDir`     | string | `paths.Root()`（agent 子行程 cwd = workspace 根；B6）                          |
+| `repoDir`     | string | `paths.Root() + "/" + reponame(cfg.Project.Repo.URL)`（git 指令 cwd、verify cwd 為 workDir） |
+| `reponame`    | string | 由 `cfg.Project.Repo.URL` 推得；替入 Base Prompt 的 `<reponame>`               |
 | `branch`      | string | `"task/" + task.ID`                                                            |
 | `base`        | string | `"origin/" + cfg.Project.Repo.Branch`                                          |
-| `issueNumber` | int    | 由 `task.ID` 剝 `github-` 前綴解析（目前版本；未來其他 source 需各自解析規則） |
+| `issueNumber` | int    | `github_issue`：由 `task.ID` 剝 `github-` 前綴解析；`local`：不適用（feedback 以 task.ID 定位 ticket 檔） |
 
 ### 3.2 input.md 模板（固定版本）
 
@@ -111,14 +119,19 @@ graph LR
 
 ```text
 You are a coding agent running inside a prepared workspace.
+Your current working directory is the workspace root. The git
+repository to work in is the `./<reponame>` subdirectory; run all
+git and build commands there. Workspace-level configuration
+(`.claude/`, `.mcp.json`) applies to you from the working directory.
 
 ## Project Context
-Read `AGENTS.md` at the repository root before starting. It describes
-the project conventions, architecture, and constraints you must follow.
+Read `AGENTS.md` at the repository root (`./<reponame>/AGENTS.md`)
+before starting. It describes the project conventions, architecture,
+and constraints you must follow.
 
 ## Task Workflow
-1. Implement the task described in the "Task Content" section below
-   on the current git branch.
+1. Change into `./<reponame>` and implement the task described in the
+   "Task Content" section below on the current git branch.
 2. Commit with message format: `<type>: #<issue-number> <description>`.
    Allowed types: feat, fix, chore, docs, refactor, test.
 3. Push the branch: `git push origin <current-branch>`.
@@ -156,7 +169,7 @@ Reporter: @<content.Author>
 ...（依 content.Comments 順序列出）
 ```
 
-Comments 為空時省略 `## Comments` 整段。`<absolute-task-dir>` 於區塊 1 渲染時替入；渲染僅字串代換，**無**條件分支、**無**巢狀模板。
+Comments 為空時省略 `## Comments` 整段。`<absolute-task-dir>` 與 `<reponame>` 於區塊 1 渲染時替入（`<reponame>` 由 `cfg.Project.Repo.URL` 推得）；渲染僅字串代換，**無**條件分支、**無**巢狀模板。`local` 型別的 Task Content 由 ticket `goal`（Title）與 `context`（Body）組裝，無 Comments 段。
 
 ### 3.3 result.json schema（由 agent 寫、本模組讀）
 
@@ -195,12 +208,14 @@ Comments 為空時省略 `## Comments` 整段。`<absolute-task-dir>` 於區塊 
 | `task.input_write_failed`       | warning | Step 3 寫入失敗                                      | `task_id`, `reason`                                                       |
 | `task.git_prepared`             | info    | Step 4 成功                                          | `task_id`, `branch`, `base`                                               |
 | `task.git_failed`               | warning | Step 4 `fetch` 或 `checkout` 失敗                    | `task_id`, `command`, `stderr`（前 1 KiB）                                |
+| `task.verifying`                | info    | Step 5.5 開始執行 ticket verify.cmd                  | `task_id`, `cmd`                                                          |
+| `task.verified`                 | info    | Step 5.5 verify 指令結束                             | `task_id`, `exit_code`, `pass`（bool）                                    |
 | `task.result_missing`           | warning | R07 Case C 且 result.json 不存在                     | `task_id`                                                                 |
 | `task.result_parse_failed`      | warning | R07 Case C 且檔案存在但解析 / 驗證失敗               | `task_id`, `reason`                                                       |
 | `task.completed`                | info    | R07 Case A + R08 成功 → done                         | `task_id`, `pr_url`, `duration_ms`                                        |
 | `task.reporting_failed`         | warning | R07 Case A + R08 失敗 → reporting                    | `task_id`, `pr_url`, `reporting_error`                                    |
 | `task.failed`                   | warning | R07 Case B / C 或 Step 1/2/3/4/5 前置失敗            | `task_id`, `reason`, `failure_count`, `agent_exit_code`（無 agent 時 -1） |
-| `task.canceled`                 | warning | ctx 取消路徑                                         | `task_id`, `step`（`content` / `input` / `git` / `agent` / `feedback`）   |
+| `task.canceled`                 | warning | ctx 取消路徑                                         | `task_id`, `step`（`content` / `input` / `git` / `agent` / `verify` / `feedback`） |
 | `task.input_invariant_violated` | error   | Run 入口 task.status ≠ queued                        | `task_id`, `got_status`                                                   |
 | `task.deleted_during_exec`      | info    | Step 2 `ContentFetcher.Fetch` 回 `ErrSourceNotFound` | `task_id`                                                                 |
 
@@ -228,10 +243,12 @@ type Deps struct {
     Paths           foundation.WorkspacePaths
     Config          foundation.Config
     Logger          logger.Logger
-    ContentFetcher  source.TaskContentFetcher   // §4.3
+    ContentFetcher  source.TaskContentFetcher   // §4.3；concrete 依 source.type（github / local）
+    Verifier        source.TaskVerifier         // §4.6；取 ticket-declared verify.cmd（local 有、github 回 nil）
     Git             gitops.TaskBranchRunner     // §4.4
     Agent           agent.AgentExecutor         // D06 §4.2
-    Feedback        source.FeedbackReporter     // D05 §4.3
+    Feedback        source.FeedbackReporter     // D05 §4.3 / D07（local）
+    SetRuntimeState  func(daemon.RuntimeState)    // 由 D02 注入；細粒度 runtime_state 落檔（B12）
 }
 
 // New 組 TaskExecutor。所有 Deps 欄位非 nil；nil 視為程式錯誤，由呼叫端在 D02
@@ -318,6 +335,26 @@ var (
 )
 ```
 
+### 4.6 TaskVerifier（本模組擁有介面）
+
+```go
+package source
+
+// TaskVerifier 取得任務的 ticket-declared 驗證方式並執行。
+// 與來源型別解耦：github_issue 的 concrete 回 (Spec{}, false)（無 verify）；
+// local 的 concrete 從 ticket 檔讀 verify.cmd。實作由對應 source 子包提供。
+type TaskVerifier interface {
+    // VerifySpec 回傳該 task 是否宣告 verify、以及其規格；ok=false 時走 result.json fallback。
+    VerifySpec(ctx context.Context, taskID string) (VerifySpec, bool, error)
+}
+
+type VerifySpec struct {
+    Cmd string   // shell 指令；exit 0 = pass，非 0 = fail
+}
+```
+
+執行由本模組於 §5 Step 5.5 進行：`exec.CommandContext` 在 workspace 根（`paths.Root()`）跑 `VerifySpec.Cmd`，環境變數繼承 daemon；指令無法啟動（找不到、無執行權限）視為 verify 失敗（coding 失敗）。concrete 由 D07 `local` 子包提供 `NewLocalTicketVerifier`；github 型別由 D05 提供一個永遠回 `ok=false` 的實作（或 dispatcher 對 github 回 nil verifier，本模組視 nil 為「無 verify」）。dispatcher `source.NewTaskVerifierFromConfig` 新增於 D02 §4.4 factory 群（比照 ContentFetcher）。
+
 ## 5. 程式資料流
 
 ### 5.1 Run 全流程
@@ -371,7 +408,7 @@ Run(ctx, task):
 
   5. res, err := Agent.Run(ctx, RunRequest{
          TaskID:     task.ID,
-         WorkDir:    repoDir,
+         WorkDir:    workDir,                 // = paths.Root()（workspace 根，B6）；repo 為其 ./<reponame> 子目錄
          InputPath:  paths.InputMd(task.ID),
          OutputPath: paths.OutputJsonl(task.ID),
          Model:      cfg.Agent.Model,
@@ -384,7 +421,23 @@ Run(ctx, task):
         finalize(task, failureOf("agent_spawn", err), -1, "", err.Error())
         return nil
 
-  6. verdict := judge(paths.ResultJson(task.ID), res.ExitCode)
+  5.5 verify（若 source 宣告 verify.cmd，否則走 result.json fallback）
+     spec, hasVerify, err := Verifier.VerifySpec(ctx, task.ID)   // github → hasVerify=false
+     if hasVerify:
+        setRuntimeState(verifying); emit "task.verifying" { task_id, cmd=spec.Cmd }
+        code := runVerify(ctx, workDir, spec.Cmd)                // exec 於 workspace 根；無法啟動視為 fail
+        if ctx.Err() != nil: emit "task.canceled" { step="verify" }; return ctx.Err()
+        prURL, msg := readResultPayload(paths.ResultJson(task.ID)) // 盡力取 pr_url/message；缺則空
+        if code == 0:
+           verdict := Verdict{Case: CodingSuccess, PrURL: prURL, Message: msg}   // pr_url 空時 D07 以 artifacts 回報
+        else:
+           verdict := Verdict{Case: CodingFailed, Message: msgOr(msg, "verify failed: exit "+code)}
+        emit "task.verified" { task_id, exit_code=code, pass=(code==0) }
+        finalize(task, verdict, res.ExitCode, verdict.PrURL, verdict.Message)
+        return nil
+
+  6. // fallback：無 verify，以 result.json 判定（R07 Case A–D）
+     verdict := judge(paths.ResultJson(task.ID), res.ExitCode)
      finalize(task, verdict, res.ExitCode, verdict.prURL, verdict.message)
      return nil
 ```
@@ -425,6 +478,7 @@ finalize(task, v, agentExit, prURL, msg):
     store.Transition(task.ID, reporting, TaskPatch{
         FinishedAt: &now, PrURL: &prURL,
     })
+    setRuntimeState(reporting)                 // B12
     fout := Feedback.Report(ctx, FeedbackInput{
         TaskID: task.ID, IssueNumber: parseIssueNumber(task.ID),
         Trigger:    TriggerCodingSuccess,
@@ -437,6 +491,7 @@ finalize(task, v, agentExit, prURL, msg):
         store.Transition(task.ID, done, TaskPatch{
             CommentID: &fout.CommentID, LastLabel: &fout.LastLabel,
         })
+        setRuntimeState(idle)                  // B12：成功終態
         emit "task.completed" info { task_id, pr_url=prURL, duration_ms=since(task.Execution.StartedAt) }
     else:
         // 狀態維持 reporting；以 UpdateFields 寫入部分成功資料 + reporting_error
@@ -465,6 +520,7 @@ finalize(task, v, agentExit, prURL, msg):
         agent_exit_code=agentExit,
     }
     // 呼叫 R08 通知失敗；成敗皆不再改 status（B8）
+    setRuntimeState(reporting)                  // B12：回報中
     _ = Feedback.Report(ctx, FeedbackInput{
         TaskID: task.ID, IssueNumber: parseIssueNumber(task.ID),
         Trigger:      TriggerCodingFailed,
@@ -474,6 +530,7 @@ finalize(task, v, agentExit, prURL, msg):
         CommentID:    task.Feedback.CommentID,
         Assignee:     cfg.Assignee.GithubUsername,
     })
+    setRuntimeState(failed)                      // B12：失敗終態；保留至下次 executing
     // fout.Result == Failure 時 D05 已發 github.cli_failed；本模組不補
 ```
 
@@ -507,7 +564,10 @@ finalize(task, v, agentExit, prURL, msg):
 | Step 3 寫檔失敗（磁碟滿 / 權限）                    | 暫時               | `task.input_write_failed` + `task.failed` warning              | `→ failed` +1；R08 通知失敗                                                                                                          |
 | Step 4 `Fetch` / `CheckoutBranch` 失敗              | 任務級（可能暫時） | `task.git_failed` + `task.failed` warning                      | `→ failed` +1；R08 通知失敗                                                                                                          |
 | Step 5 `ErrAgentSpawn` / `ErrAgentIO`               | 程式 / 環境錯誤    | `agent.spawn_failed`（D06 發） + `task.failed` warning         | `→ failed` +1；R08 通知失敗                                                                                                          |
-| Step 5 agent exit ≠ 0                               | **非** 錯誤路徑    | `task.agent_exited` warning（D06 發）                          | 繼續 judge；以 `result.json` 為主判定                                                                                                |
+| Step 5 agent exit ≠ 0                               | **非** 錯誤路徑    | `task.agent_exited` warning（D06 發）                          | 繼續 verify / judge；成敗以 verify 或 `result.json` 為主判定                                                                         |
+| Step 5.5 verify exit ≠ 0（ticket 宣告 verify）      | R07 路徑 A 失敗    | `task.verified {pass=false}` + `task.failed`                  | `→ failed` +1；R08 / ticket 回報失敗                                                                                                |
+| Step 5.5 verify 指令無法啟動（找不到 / 無執行權限） | 任務級（環境）     | `task.verified {exit_code=-1,pass=false}` + `task.failed`     | 同上（視為 coding 失敗）                                                                                                            |
+| Step 5.5 verify ctx 取消                            | 暫時（非錯誤）     | `task.canceled {step=verify}`                                  | Run 回 `ctx.Err()`；task 留 `processing`，D02 B1.7 重置                                                                             |
 | Step 6 judge Missing                                | R07 Case C         | `task.result_missing` + `task.failed`                          | `→ failed` +1；R08 通知失敗                                                                                                          |
 | Step 6 judge ParseFailed / Invalid                  | R07 Case C         | `task.result_parse_failed` + `task.failed`                     | 同上                                                                                                                                 |
 | Step 6 judge CodingFailed                           | R07 Case B         | `task.failed`                                                  | 同上                                                                                                                                 |
