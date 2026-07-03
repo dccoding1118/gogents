@@ -5,16 +5,22 @@
 ## Architecture
 
 ```
-┌────────────┐     ┌──────────┐     ┌───────────────┐     ┌─────────────┐
-│  GitHub    │────▶│  Syncer  │────▶│  Task Store   │────▶│   Runner    │
-│  Issues    │◀────│  (D02)   │     │  (D01)        │     │   (D03)     │
-└────────────┘     └──────────┘     └───────────────┘     └──────┬──────┘
-                                                                  │
-                                                          ┌───────▼───────┐
-                                                          │  Agent CLI    │
-                                                          │    claude     │
-                                                          └───────────────┘
+┌──────────────────┐
+│  GitHub Issues   │──┐
+└──────────────────┘  │
+                      │   ┌──────────┐     ┌──────────────┐     ┌───────────┐
+                      ├──▶│  Syncer  │────▶│  Task Store  │────▶│  Runner   │
+                      │   │  (D02)   │     │  (D01)       │     │  (D03)    │
+┌──────────────────┐  │   └──────────┘     └──────────────┘     └─────┬─────┘
+│  Local Tickets   │──┘                                               │
+│  (~/.am/tickets) │                                           ┌──────▼──────┐
+└──────────────────┘                                           │  Agent CLI  │
+         ▲                                                     │   claude    │
+         │                                                     └──────┬──────┘
+         └───────────────── feedback (results) ────────────────────┘
 ```
+
+Two task sources feed one shared pipeline: `github_issue` (GitHub Issues via `gh`) and `local` (an agent-manager ticket inbox at `~/.am/tickets/`). Results are reported back to the originating source.
 
 | Module | Package               | Description                                        |
 | ------ | --------------------- | -------------------------------------------------- |
