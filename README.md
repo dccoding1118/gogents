@@ -33,7 +33,7 @@ Two task sources feed one shared pipeline: `github_issue` (GitHub Issues via `gh
 
 ## Features
 
-- **Pluggable Task Sources** — `github_issue` polls GitHub Issues (via `gh` CLI) by label; `local` reads an am ticket inbox (`~/.am/tickets/`) filtered by worker label. Both share one task store, state machine, and execution pipeline.
+- **Pluggable Task Sources** — `github_issue` polls GitHub Issues (via `gh` CLI) by label; `local` reads an am ticket inbox (`~/.am/tickets/`), claiming tickets that match the worker label **and** carry `status: queued`. Both share one task store, state machine, and execution pipeline.
 - **Pluggable Agent Architecture** — Agents sit behind a simple probe/executor interface. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the officially supported agent; new agents can be added by implementing the interface.
 - **Automated Execution Pipeline** — For each task: fetches task content → prepares `input.md` → creates a Git branch → invokes the agent (with the **workspace root** as its working directory, so workspace-level `.claude/` and `.mcp.json` apply) → judges the result → reports back to the source.
 - **Ticket-Declared Verification** — A `local` ticket may declare a `verify` command; the daemon runs it in the workspace and uses its exit code to judge pass/fail, falling back to the `result.json` coding verdict when unspecified.
@@ -136,7 +136,7 @@ bin/gogents logs <workspace|name>
 
 ## agent-manager Integration
 
-GoGents is the **execution plane** for [agent-manager](https://github.com/dccoding1118/agent-manager) (am), the local agent control plane (Tower). am produces tickets into `~/.am/tickets/`; a GoGents worker daemon configured with `source.type: local` claims tickets matching its worker label, executes them, runs the ticket's `verify` command, and writes the terminal `status` and `result` back to the ticket file. Communication is one-way (`am → gogents`): am queries live execution state via `gogents runtime status` / `gogents logs` rather than caching it. See `docs/requirements/reqs/R11-local-source.md` and `R12-runtime-observability.md`.
+GoGents is the **execution plane** for [agent-manager](https://github.com/dccoding1118/agent-manager) (am), the local agent control plane (Tower). am produces tickets into `~/.am/tickets/`; a GoGents worker daemon configured with `source.type: local` claims tickets matching its worker label whose `status` is `queued` (am's dispatch gate — `blocked` and other states are left untouched), executes them, runs the ticket's `verify` command, and writes the terminal `status` and `result` back to the ticket file. Communication is one-way (`am → gogents`): am queries live execution state via `gogents runtime status` / `gogents logs` rather than caching it. See `docs/requirements/reqs/R11-local-source.md` and `R12-runtime-observability.md`.
 
 ## Development
 

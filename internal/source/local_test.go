@@ -28,8 +28,8 @@ func writeTicket(t *testing.T, dir, name, content string) {
 
 func TestLocalSource_List(t *testing.T) {
 	dir := t.TempDir()
-	writeTicket(t, dir, "t-1.yaml", "id: t-1\nworker: backend\ngoal: do a\ncontext: ctx a\nupdated_at: 2026-01-01T00:00:00Z\n")
-	writeTicket(t, dir, "t-2.yaml", "id: t-2\nworker: frontend\ngoal: do b\n")
+	writeTicket(t, dir, "t-1.yaml", "id: t-1\nworker: backend\ngoal: do a\ncontext: ctx a\nstatus: queued\nupdated_at: 2026-01-01T00:00:00Z\n")
+	writeTicket(t, dir, "t-2.yaml", "id: t-2\nworker: frontend\ngoal: do b\nstatus: queued\n")
 	writeTicket(t, dir, "bad.yaml", "this is not a mapping")
 
 	src := newLocalTicketSource(localCfg(dir, "backend"), &mockTestLogger{})
@@ -58,6 +58,51 @@ func TestLocalSource_List(t *testing.T) {
 			t.Fatalf("expected 1 task, got %d", len(tasks))
 		}
 	})
+}
+
+// TestLocalSource_ListStatusGate covers the am dispatch gate: only status ==
+// queued tickets are claimed; blocked / terminal / missing states are skipped.
+func TestLocalSource_ListStatusGate(t *testing.T) {
+	dir := t.TempDir()
+	writeTicket(t, dir, "queued.yaml", "id: queued\nworker: backend\ngoal: g\nstatus: queued\n")
+	writeTicket(t, dir, "blocked.yaml", "id: blocked\nworker: backend\ngoal: g\nstatus: blocked\n")
+	writeTicket(t, dir, "done.yaml", "id: done\nworker: backend\ngoal: g\nstatus: done\n")
+	writeTicket(t, dir, "failed.yaml", "id: failed\nworker: backend\ngoal: g\nstatus: failed\n")
+	writeTicket(t, dir, "review.yaml", "id: review\nworker: backend\ngoal: g\nstatus: awaiting_review\n")
+	writeTicket(t, dir, "nostatus.yaml", "id: nostatus\nworker: backend\ngoal: g\n")
+	writeTicket(t, dir, "empty.yaml", "id: empty\nworker: backend\ngoal: g\nstatus: \"\"\n")
+
+	src := newLocalTicketSource(localCfg(dir, "backend"), &mockTestLogger{})
+
+	t.Run("D07-01a only queued claimed", func(t *testing.T) {
+		tasks, err := src.List(context.Background(), SourceFilter{Labels: []string{"backend"}})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(tasks) != 1 || tasks[0].TaskID != "queued" {
+			t.Fatalf("expected only the queued ticket, got %+v", tasks)
+		}
+	})
+}
+
+// TestLocalSource_ListLabelStatusCross covers the label × status cross filter:
+// a queued ticket for another worker, and a non-queued ticket for this worker,
+// are both skipped; only this worker's queued ticket is returned.
+func TestLocalSource_ListLabelStatusCross(t *testing.T) {
+	dir := t.TempDir()
+	writeTicket(t, dir, "mine-queued.yaml", "id: mine-queued\nworker: backend\ngoal: g\nstatus: queued\n")
+	writeTicket(t, dir, "mine-blocked.yaml", "id: mine-blocked\nworker: backend\ngoal: g\nstatus: blocked\n")
+	writeTicket(t, dir, "other-queued.yaml", "id: other-queued\nworker: frontend\ngoal: g\nstatus: queued\n")
+
+	src := newLocalTicketSource(localCfg(dir, "backend"), &mockTestLogger{})
+
+	tasks, err := src.List(context.Background(), SourceFilter{Labels: []string{"backend"}})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].TaskID != "mine-queued" {
+		t.Fatalf("D07-01b expected only mine-queued, got %+v", tasks)
+	}
 }
 
 func TestLocalSource_Get(t *testing.T) {

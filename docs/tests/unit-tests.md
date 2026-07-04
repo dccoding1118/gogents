@@ -119,6 +119,8 @@
 | 編號   | 測試對象         | 測試情境 (Scenario)                       | 預期結果 (Expected)                                                              |
 | :----- | :--------------- | :---------------------------------------- | :------------------------------------------------------------------------------- |
 | D07-01 | LocalSource      | List: 依 label 過濾 ticket                | 僅回傳 `worker` 等於 `filter.label` 的 ticket，映射為 `SourceTask` (TaskID=ticket id) |
+| D07-01a| LocalSource      | List: `status == queued` 閘門             | 同 label 下,`queued` 被認領;`blocked` / `done` / `failed` / `awaiting_review` 及 `status` 缺失/空一律不認領 |
+| D07-01b| LocalSource      | List: label × status 交叉過濾             | 他 label 的 `queued` 不認領、本 label 的非 `queued` 不認領;僅本 label 且 `queued` 回傳 |
 | D07-02 | LocalSource      | List: 單一 ticket 格式錯誤                | 記 `source.ticket_parse_failed` 並略過該筆，其餘正常回傳                          |
 | D07-03 | LocalSource      | Get: ticket 檔不存在                      | 回 `ErrSourceNotFound` (對應 am 刪除 ticket)                                     |
 | D07-04 | LocalSource      | Get: 讀取/解析失敗                        | 回 `ErrSourceTransient` (保守，下輪重試)                                         |

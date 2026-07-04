@@ -9,7 +9,7 @@
 ## 定位:am 與 gogents 的分工
 
 - **am(控制面)**:產出 ticket、治理 mission/DAG、HITL 審查。ticket 落 `~/.am/tickets/`,以 `worker`(label) 標記歸屬。am 不寫 worker 的 `.gogents/`。
-- **gogents(執行面)**:讀 ticket inbox、依 label 認領、執行、回寫終態。執行明細留 gogents 日誌,am 經 `gogents logs`(R12)取。
+- **gogents(執行面)**:讀 ticket inbox、依 label 與 `status == queued` 認領、執行、回寫終態。執行明細留 gogents 日誌,am 經 `gogents logs`(R12)取。
 - **單向溝通**:`am → gogents`。am 不維護執行狀態副本;live 狀態向 `gogents runtime status`(R12)查,終態結果由 gogents 回寫 ticket 檔。
 
 ## ticket 檔格式
@@ -23,7 +23,7 @@
 | `goal`          | input.md 的任務標題/摘要                                 | 讀    |
 | `context`       | input.md 的任務內容                                      | 讀    |
 | `verify`        | 驗證方式(`cmd`;見下)                                  | 讀    |
-| `status`        | 終態回寫(`done` / `failed`)                            | 寫    |
+| `status`        | 認領閘門(僅 `queued` 可認領);終態回寫(`done` / `failed`) | 讀/寫 |
 | `result`        | 終態結果回寫(`code` / `artifacts`;見下)              | 寫    |
 | `updated_at`    | 比對變化偵測;回寫終態時更新                             | 讀/寫 |
 
@@ -34,9 +34,10 @@
 比照 `github_issue` 依 label 過濾:
 
 - **掃描**:列出 `source.path` 下的 ticket 檔(`*.yaml`)
-- **過濾**:僅認領 `worker` 等於 `source.filter.label` 的 ticket(比照 GitHub 依 label 過濾)
+- **過濾**:先比對 `worker` 等於 `source.filter.label`,再要求 `status == queued`;兩者皆符才認領。`status` 是 am 的 dispatch 閘門——只有 `queued` 代表前置(`depends_on`)已滿足、可被 worker 認領;`blocked` / `done` / `failed` / `awaiting_review` / 空 / 無法解析一律不認領,交由 am 以狀態控制 dispatch 時機
 - **import**:未在本地 task store 的 ticket → 建 `task.yaml`,`task_id` = ticket `id`,status=`queued`,`failure_count`=0,填入 source 欄位(ticket 路徑、label、`updated_at`)
-- **多 daemon 共讀**:多個 worker daemon 共讀同一 inbox、各取各 label、無爭用(各 daemon 只認領自己 label 的 ticket)
+- **執行中不重領**:gogents 於 `processing_started` 不回寫 ticket(只寫終態),被認領、執行中的 ticket 其 am `status` 仍為 `queued`,會持續出現在掃描結果;這由既有「以 task id 去重、已在 task store 者不重複匯入」機制吸收,不造成重複執行。終態(`done`/`failed`)回寫後 `status != queued`,自動不再被認領
+- **多 daemon 共讀**:多個 worker daemon 共讀同一 inbox、各取各 label、無爭用(各 daemon 只認領自己 label 且 `queued` 的 ticket)
 
 ### 既有任務狀態變化與刪除偵測
 

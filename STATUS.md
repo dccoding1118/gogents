@@ -49,6 +49,10 @@
   - **程式層**：`query.go` — `RuntimeView` 加 json tag、`StatusView.MarshalJSON`（`LastSyncAt` 零值→`""`、非零→RFC3339）、新 sentinel `ErrStateNotFound` 包進 state.yaml 缺失錯誤；`cli.go` — `runRuntime` 加 `--json` 分支、`extractBoolFlag`（位置容忍：旗標在 target 前後皆可）、`printJSON`（stdout compact JSON）、`emitRuntimeError`+`newRuntimeErrorEnvelope`（error→code 分類、輸出至 stderr、非零 exit）
   - **測試**：`json_test.go` D08-11（list 陣列／空→`[]`）、D08-12（status flat 物件、down、`last_sync_at`/`current_task` 空字串、非零 RFC3339）、D08-13（三 code + envelope marshal）、`extractBoolFlag` 位置容忍
   - **驗證**：`go build`／`go test ./...` 全通過、`golangci-lint run` 0 issues；CLI 煙測 — `list --json`（有/空`[]`）、`status --json`（down、零值`""`、旗標前後）、錯誤（`runtime_not_found`/`state_not_found` 走 stderr、stdout 無 payload、exit 1）、text 模式不變 皆正確。尚未 commit
+- `docs/changes/change-filter-queued-tickets.md`（CH-005：local 源只認領 `status == queued` 的 ticket）**文件 + 程式 + 測試全部完成**
+  - **文件層**：README（Pluggable Task Sources、am 整合節）、R02（local 認領條件 + config 註解）、R11（ticket 欄位表 `status` 改讀/寫、掃描與認領過濾規則 + 執行中不重領說明、am/gogents 分工）、D07（B3 List、§3.1 `status` 映射、§5.1 List pseudo-code、§7.1 驗收表）、requirement.md 路線圖、unit-tests.md（D07-01a/01b）皆已對齊「先 label 後 `status==queued`」
+  - **程式層**：`internal/source/local.go` `List` 在 label 過濾後追加 `t.Status != "queued"` 過濾（am dispatch 閘門）；`local_test.go` 既有 `TestLocalSource_List` fixtures 補 `status: queued`，新增 `TestLocalSource_ListStatusGate`（D07-01a：僅 queued 認領、blocked/done/failed/awaiting_review/缺失/空皆略過）與 `TestLocalSource_ListLabelStatusCross`（D07-01b：label × status 交叉）
+  - **驗證**：`go build ./...`、`go test ./...` 全通過、`golangci-lint run ./internal/source/...` 0 issues、`go vet` clean。尚未 commit
 - 工作區既有未提交改動：`internal/agent/claude.go`、`internal/daemon/syncer_test.go`、`internal/foundation/workspace.go`（先前 session in-progress）
 
 ## 後續架構調整（依你 review 確認）

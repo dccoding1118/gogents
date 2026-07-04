@@ -45,7 +45,7 @@ R06 → R07 → R08。完成後系統就能跑完整流程: 開任務 → daemon
 R10。 處理各種失敗情境: agent CLI 崩潰、git 失敗、GitHub API 失敗、daemon 重啟後的狀態恢復。
 
 **Stage 5 — agent-manager (am) 整合**
-R11 → R12。新增 `local` 任務源(讀 `~/.am/tickets/` ticket inbox、依 label 過濾、ticket `verify` 驗證、終態 result 回寫 ticket 檔),以及 runtime 註冊(`start` 寫入 `~/.gogents/config.yaml`)與觀測 CLI(`gogents runtime list/status`、`gogents logs`)。完成後 am 可佈署 worker、派工、查詢執行狀態與匯出稽核。
+R11 → R12。新增 `local` 任務源(讀 `~/.am/tickets/` ticket inbox、依 label 與 `status == queued` 過濾、ticket `verify` 驗證、終態 result 回寫 ticket 檔),以及 runtime 註冊(`start` 寫入 `~/.gogents/config.yaml`)與觀測 CLI(`gogents runtime list/status`、`gogents logs`)。完成後 am 可佈署 worker、派工、查詢執行狀態與匯出稽核。
 
 ## 依賴關係圖
 

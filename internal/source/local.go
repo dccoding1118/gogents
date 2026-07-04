@@ -147,6 +147,12 @@ func (s *localTicketSource) List(_ context.Context, filter SourceFilter) ([]Sour
 		if t.Worker != want {
 			continue
 		}
+		// am's dispatch gate: only status == queued means the ticket's
+		// depends_on are satisfied and it may be claimed. blocked / terminal /
+		// missing states are left for am to advance.
+		if t.Status != "queued" {
+			continue
+		}
 		out = append(out, mapTicketToSourceTask(t, p))
 	}
 	return out, nil
