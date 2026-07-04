@@ -5,6 +5,7 @@ package cli
 // config.yaml, state.yaml, or task.yaml.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,14 +16,22 @@ import (
 	"github.com/dccoding/gogents/internal/foundation"
 )
 
-// RuntimeView is one row of `runtime list`.
+// ErrStateNotFound is returned by Status when the target is registered but has
+// no state.yaml (never started). The --json layer maps it to code
+// "state_not_found" (D08 §3.4).
+var ErrStateNotFound = errors.New("state.yaml not found")
+
+// RuntimeView is one row of `runtime list`. The json tags are the stable
+// machine-readable contract consumed by the am adapter (D08 §3.4).
 type RuntimeView struct {
-	Name         string
-	Workspace    string
-	RegisteredAt string
+	Name         string `json:"name"`
+	Workspace    string `json:"workspace"`
+	RegisteredAt string `json:"registered_at"` // RFC3339 string
 }
 
-// StatusView is the output of `runtime status`.
+// StatusView is the output of `runtime status`. Its JSON form is emitted via a
+// custom MarshalJSON so that a zero LastSyncAt renders as "" rather than
+// 0001-01-01T… (D08 §3.4).
 type StatusView struct {
 	RuntimeView
 	RuntimeState   string // state.yaml value; "down" when the PID is not alive.
@@ -31,6 +40,36 @@ type StatusView struct {
 	CurrentTask    string
 	LastSyncAt     time.Time
 	LastSyncStatus string
+}
+
+// MarshalJSON renders StatusView as the flat runtime-status contract. LastSyncAt
+// is RFC3339, or "" when zero (never synced).
+func (s StatusView) MarshalJSON() ([]byte, error) {
+	lastSync := ""
+	if !s.LastSyncAt.IsZero() {
+		lastSync = s.LastSyncAt.Format(time.RFC3339)
+	}
+	return json.Marshal(struct {
+		Name           string `json:"name"`
+		Workspace      string `json:"workspace"`
+		RegisteredAt   string `json:"registered_at"`
+		RuntimeState   string `json:"runtime_state"`
+		Pid            int    `json:"pid"`
+		Alive          bool   `json:"alive"`
+		CurrentTask    string `json:"current_task"`
+		LastSyncAt     string `json:"last_sync_at"`
+		LastSyncStatus string `json:"last_sync_status"`
+	}{
+		Name:           s.Name,
+		Workspace:      s.Workspace,
+		RegisteredAt:   s.RegisteredAt,
+		RuntimeState:   s.RuntimeState,
+		Pid:            s.Pid,
+		Alive:          s.Alive,
+		CurrentTask:    s.CurrentTask,
+		LastSyncAt:     lastSync,
+		LastSyncStatus: s.LastSyncStatus,
+	})
 }
 
 // List returns all registered runtimes (R12 B2).
@@ -58,7 +97,7 @@ func Status(gcfg foundation.GlobalConfigStore, target string) (StatusView, error
 	paths := foundation.NewWorkspacePaths(reg.Workspace)
 	statePath := paths.StateYaml()
 	if _, sErr := os.Stat(statePath); sErr != nil {
-		return StatusView{}, fmt.Errorf("runtime %q registered but state.yaml not found (never started?): %s", target, statePath)
+		return StatusView{}, fmt.Errorf("runtime %q registered but state.yaml not found (never started?): %s: %w", target, statePath, ErrStateNotFound)
 	}
 
 	st, err := daemon.NewStateStore(statePath).Load()

@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -43,19 +44,24 @@ func Dispatch(args []string) int {
 }
 
 // runRuntime handles `gogents runtime list` and `gogents runtime status <target>`.
+// Both accept an opt-in `--json` flag (position-tolerant, D08 §3.4).
 func runRuntime(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: gogents runtime <list|status> [target]")
+		fmt.Fprintln(os.Stderr, "usage: gogents runtime <list|status> [target] [--json]")
 		return 1
 	}
+	sub := args[0]
+	rest, jsonOut := extractBoolFlag(args[1:], "json")
 	gcfg := foundation.NewGlobalConfigStore()
 
-	switch args[0] {
+	switch sub {
 	case "list":
 		views, err := List(gcfg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return 1
+			return emitRuntimeError(jsonOut, err)
+		}
+		if jsonOut {
+			return printJSON(views)
 		}
 		if len(views) == 0 {
 			fmt.Println("(no registered runtimes)")
@@ -67,14 +73,16 @@ func runRuntime(args []string) int {
 		return 0
 
 	case "status":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "usage: gogents runtime status <workspace|name>")
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: gogents runtime status <workspace|name> [--json]")
 			return 1
 		}
-		view, err := Status(gcfg, args[1])
+		view, err := Status(gcfg, rest[0])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			return 1
+			return emitRuntimeError(jsonOut, err)
+		}
+		if jsonOut {
+			return printJSON(view)
 		}
 		fmt.Printf("name:          %s\n", view.Name)
 		fmt.Printf("workspace:     %s\n", view.Workspace)
@@ -85,9 +93,79 @@ func runRuntime(args []string) int {
 		return 0
 
 	default:
-		fmt.Fprintf(os.Stderr, "unknown runtime subcommand: %s\n", args[0])
+		fmt.Fprintf(os.Stderr, "unknown runtime subcommand: %s\n", sub)
 		return 1
 	}
+}
+
+// extractBoolFlag removes every occurrence of --name/-name from args and reports
+// whether it was present. Unlike the flag package it tolerates the flag in any
+// position (before or after positional args), so `runtime status <t> --json` and
+// `runtime status --json <t>` both work (D08 §3.4).
+func extractBoolFlag(args []string, name string) (remaining []string, present bool) {
+	long, short := "--"+name, "-"+name
+	remaining = make([]string, 0, len(args))
+	for _, a := range args {
+		if a == long || a == short {
+			present = true
+			continue
+		}
+		remaining = append(remaining, a)
+	}
+	return remaining, present
+}
+
+// printJSON writes v as compact JSON to stdout and returns exit 0.
+func printJSON(v any) int {
+	enc, err := json.Marshal(v)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	fmt.Println(string(enc))
+	return 0
+}
+
+// emitRuntimeError renders a query failure. In --json mode it writes a single
+// {"error":{"code","message"}} object to stderr with a classified code (D08
+// §3.4); otherwise the existing `error: …` text. Exit is non-zero either way.
+func emitRuntimeError(jsonOut bool, err error) int {
+	if !jsonOut {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	enc, mErr := json.Marshal(newRuntimeErrorEnvelope(err))
+	if mErr != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(os.Stderr, string(enc))
+	return 1
+}
+
+// runtimeErrorEnvelope is the --json failure contract (D08 §3.4).
+type runtimeErrorEnvelope struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// newRuntimeErrorEnvelope classifies err into a stable code: runtime_not_found
+// (target not registered), state_not_found (registered but no state.yaml), or
+// internal (everything else).
+func newRuntimeErrorEnvelope(err error) runtimeErrorEnvelope {
+	code := "internal"
+	switch {
+	case errors.Is(err, foundation.ErrRuntimeNotRegistered):
+		code = "runtime_not_found"
+	case errors.Is(err, ErrStateNotFound):
+		code = "state_not_found"
+	}
+	var env runtimeErrorEnvelope
+	env.Error.Code = code
+	env.Error.Message = err.Error()
+	return env
 }
 
 // runLogs handles `gogents logs <target> [--error]`.
