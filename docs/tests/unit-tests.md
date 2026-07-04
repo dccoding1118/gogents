@@ -145,3 +145,6 @@
 | D08-08 | Status        | 以 name 反查、多筆同名                       | 回 `registered_at` 最近者；以 workspace 路徑則精確匹配                              |
 | D08-09 | Logs          | logs：預設與 `--error`                       | 分別回 `daemon.jsonl` / `error.jsonl` 路徑；目標未註冊回錯                          |
 | D08-10 | ReadOnly      | list / status / logs 不改檔                  | 查詢後 config.yaml / state.yaml / task.yaml 的 mtime 不變                           |
+| D08-11 | JSON list     | `runtime list --json`：多筆／空                | 多筆輸出 JSON 陣列；無註冊輸出 `[]`（非文字）、exit 0                               |
+| D08-12 | JSON status   | `runtime status --json`：含 `down`／空欄位     | 單一 JSON 物件；pid 不存活 `runtime_state=down`、`alive=false`；`last_sync_at` 未同步為 `""`、`current_task` 空為 `""` |
+| D08-13 | JSON error    | `--json` 失敗：各 `code`                       | stderr 輸出 `{"error":{"code,message}}`、stdout 無 payload、exit ≠ 0；`runtime_not_found` / `state_not_found` / `internal` 各命中 |

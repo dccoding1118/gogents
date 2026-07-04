@@ -54,9 +54,11 @@ graph LR
 
 | 指令                              | 參數                | 說明                              |
 | --------------------------------- | ------------------- | --------------------------------- |
-| `gogents runtime list`            | —                   | 列出所有已註冊 runtime            |
-| `gogents runtime status <target>` | `<workspace\|name>` | 查單一 runtime 即時狀態           |
+| `gogents runtime list`            | `--json`（可選）    | 列出所有已註冊 runtime            |
+| `gogents runtime status <target>` | `<workspace\|name>`;`--json`（可選） | 查單一 runtime 即時狀態           |
 | `gogents logs <target>`           | `<workspace\|name>`;`--error`（可選,輸出 error.jsonl） | 輸出 runtime 日誌 |
+
+`--json` 為 `runtime list` 與 `runtime status` 各自的布林旗標,位置容忍度比照現行 flag 解析（`runtime status <target> --json` 與 `runtime status --json <target>` 皆可,與 `logs --error` 一致）。`logs` 無 `--json`（維持 JSONL 直通）。
 
 ### 3.2 status 輸出欄位
 
@@ -71,7 +73,63 @@ graph LR
 | `last_sync_at`  | state.yaml `sync.last_sync_at`        | —                                    |
 | `last_sync_status` | state.yaml `sync.last_sync_status` | success / failed                     |
 
-輸出格式：預設人類可讀表列;`--json`（可選）供 am 程式化解析。
+輸出格式：預設人類可讀表列;`--json` 供 am 程式化解析（穩定資料契約,見 §3.4）。
+
+### 3.4 `--json` 資料契約
+
+`--json` 提供**穩定的機器可讀契約**,讓 am 轉接器不必逐行解析顯示層。未帶 `--json` 時所有文字輸出與 exit 行為完全不變（向後相容）。
+
+**`runtime list --json`** — stdout 輸出 JSON 陣列、exit 0;無註冊時輸出 `[]`（**非**文字 `(no registered runtimes)`）。每筆對應 `RuntimeView`:
+
+```json
+[
+  {"name": "coding", "workspace": "/home/u/.am/workers/coding", "registered_at": "2026-07-04T12:00:00+08:00"}
+]
+```
+
+**`runtime status <target> --json`** — stdout 輸出單一 JSON 物件、exit 0,對應 `StatusView`:
+
+```json
+{
+  "name": "coding",
+  "workspace": "/home/u/.am/workers/coding",
+  "registered_at": "2026-07-04T12:00:00+08:00",
+  "runtime_state": "idle",
+  "pid": 12345,
+  "alive": true,
+  "current_task": "t-0007",
+  "last_sync_at": "2026-07-04T12:03:00+08:00",
+  "last_sync_status": "ok"
+}
+```
+
+| JSON 欄位          | 來源                       | 說明                                                             |
+| ------------------ | -------------------------- | ---------------------------------------------------------------- |
+| `name`             | `RuntimeView.Name`         | runtime 名                                                       |
+| `workspace`        | `RuntimeView.Workspace`    | workspace 路徑（註冊主鍵）                                       |
+| `registered_at`    | `RuntimeView.RegisteredAt` | 註冊時間,RFC3339                                                 |
+| `runtime_state`    | `StatusView.RuntimeState`  | `idle/executing/verifying/reporting/failed/broken`;pid 不存活為 `down` |
+| `pid`              | `StatusView.Pid`           | 記錄的 daemon PID                                                |
+| `alive`            | `StatusView.Alive`         | 查詢時 pid 檢核結果                                              |
+| `current_task`     | `StatusView.CurrentTask`   | 當前任務 id,空字串＝無                                           |
+| `last_sync_at`     | `StatusView.LastSyncAt`    | RFC3339;尚未同步時輸出空字串 `""`（不輸出 `0001-01-01…`）        |
+| `last_sync_status` | `StatusView.LastSyncStatus`| 最近同步結果                                                     |
+
+時間戳一律 RFC3339。`LastSyncAt` 為 `time.Time`,零值 marshal 時須輸出空字串（見 §4 的自訂 JSON 型別）。
+
+**`--json` 錯誤契約** — 失敗時 stdout 不輸出成功 payload;stderr 輸出單一 JSON 錯誤物件、非零 exit:
+
+```json
+{"error": {"code": "runtime_not_found", "message": "runtime \"coding\" not registered"}}
+```
+
+| `code`              | 情境                                                        |
+| ------------------- | --------------------------------------------------------- |
+| `runtime_not_found` | `Resolve` 失敗:target 不在 `~/.gogents/config.yaml` 註冊表 |
+| `state_not_found`   | 已註冊但無 `state.yaml`（尚未 `start` 過）                 |
+| `internal`          | 其他失敗（load 錯誤等）                                    |
+
+exit code 維持現行（非零即可）,失敗分類以 `error.code` 表達,不新增 exit code 方案。非 `--json` 模式的錯誤輸出（stderr `error: …` 文字）維持不變。
 
 ### 3.3 pid 存活檢核
 
@@ -95,23 +153,27 @@ func Status(gcfg foundation.GlobalConfigStore, target string) (StatusView, error
 func Logs(gcfg foundation.GlobalConfigStore, paths foundation.WorkspacePaths, target string, errOnly bool) (logPath string, err error)
 
 type RuntimeView struct {
-    Name         string
-    Workspace    string
-    RegisteredAt time.Time
+    Name         string `json:"name"`
+    Workspace    string `json:"workspace"`
+    RegisteredAt string `json:"registered_at"` // RFC3339 字串
 }
 
 type StatusView struct {
     RuntimeView
-    RuntimeState    string   // state.yaml 值;pid 不存活時為 "down"
-    Pid            int
-    Alive          bool
-    CurrentTask    string   // 空字串表示無
-    LastSyncAt     time.Time
-    LastSyncStatus string
+    RuntimeState   string   `json:"runtime_state"`   // state.yaml 值;pid 不存活時為 "down"
+    Pid            int      `json:"pid"`
+    Alive          bool     `json:"alive"`
+    CurrentTask    string   `json:"current_task"`    // 空字串表示無
+    LastSyncAt     time.Time `json:"last_sync_at"`   // 零值 marshal 為 ""（見下）
+    LastSyncStatus string   `json:"last_sync_status"`
 }
 ```
 
 `Status` 內部：`gcfg.Resolve(target)` → 建 `WorkspacePaths(workspace)` → `StateStore(paths).Load()` → pid 檢核 → 若 `!alive` 則 `RuntimeState = "down"`。
+
+**JSON 輸出型別**：`--json` 直接對 `RuntimeView` / `StatusView` 加 JSON tag。`LastSyncAt` 為 `time.Time`,其零值以標準 marshal 會輸出 `0001-01-01T…`;因此 status 的 JSON 輸出改用一個 DTO（或以 `MarshalJSON` 自訂），將零值 `LastSyncAt` 輸出為空字串 `""`,非零值輸出 RFC3339。其餘欄位直通。
+
+**`--json` 錯誤物件**：CLI 層將 `Resolve` / `Status` 回傳的 error 對映為 `{"error":{"code","message"}}`（§3.4）——`ErrRuntimeNotRegistered` → `runtime_not_found`;state.yaml 缺失 → `state_not_found`;其餘 → `internal`——序列化至 stderr、非零 exit。
 
 ## 5. 程式資料流
 
@@ -164,7 +226,7 @@ Logs(gcfg, _, target, errOnly):
 | name 多筆同名                         | 歧義     | 取 `registered_at` 最近者;（可選）warning 提示以 workspace 精確指定 |
 | logs 日誌檔不存在                     | 使用者錯 | exit ≠ 0;訊息指出該 runtime 尚無日誌                       |
 
-查詢子指令為短命 CLI,錯誤直接寫 stderr + 非零 exit,不寫 daemon.jsonl。
+查詢子指令為短命 CLI,錯誤直接寫 stderr + 非零 exit,不寫 daemon.jsonl。以上為預設文字模式;`--json` 模式下同樣的失敗改以結構化錯誤物件（`error.code`,見 §3.4）輸出至 stderr,exit code 與文字模式相同。
 
 ## 7. 驗收方式
 
@@ -184,6 +246,8 @@ Logs(gcfg, _, target, errOnly):
 | D    | `gogents runtime status $WS`                           | 輸出 `runtime_state`（idle/executing…）、`pid`、`current_task`、`last_sync`      |
 | E    | `kill -9 <pid>` 後 `gogents runtime status $WS`        | `runtime_state: down`、`alive: false`;exit 0                                    |
 | F    | `gogents logs $WS`                                      | 輸出該 runtime `daemon.jsonl` 內容;`--error` 輸出 `error.jsonl`                 |
+| G    | `gogents runtime list --json`                           | stdout 輸出 JSON 陣列;無註冊時輸出 `[]`、exit 0                                 |
+| H    | `gogents runtime status $WS --json`                     | stdout 輸出單一 JSON 物件（欄位如 §3.4）;`last_sync_at` 未同步時為 `""`          |
 
 ### 7.3 錯誤路徑
 
@@ -192,6 +256,8 @@ Logs(gcfg, _, target, errOnly):
 | `runtime status <未註冊 name>`    | exit ≠ 0;提示 `runtime list`                              |
 | `runtime status` 指向 state.yaml 缺失的 workspace | exit ≠ 0;訊息指出未曾啟動                  |
 | `logs <未註冊>`                   | exit ≠ 0                                                   |
+| `runtime status <未註冊> --json`  | stderr 輸出 `{"error":{"code":"runtime_not_found",…}}`、exit ≠ 0;stdout 無 payload |
+| `runtime status --json` 指向 state.yaml 缺失的 workspace | stderr `error.code = state_not_found`、exit ≠ 0 |
 
 ### 7.4 通過條件
 

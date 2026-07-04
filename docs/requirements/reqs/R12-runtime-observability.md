@@ -47,6 +47,18 @@ runtime 的執行狀態由兩部分構成:
 - 輸出該 runtime 的 `~/.gogents/logs/<hash>/` 日誌(`daemon.jsonl` / `error.jsonl`)
 - 供 am 稽核匯出併入(`am audit export` 經此取執行明細)
 
+## `--json` 結構化輸出
+
+`runtime list` 與 `runtime status` 各提供 opt-in 的 `--json` 布林旗標,對 am 轉接器提供**穩定的資料契約**,使其毋須逐行解析人類可讀顯示層(欄位增減、順序或時間格式變動不致無聲破壞解析)。`logs` 不含 `--json`(維持 JSONL 直通)。
+
+- `runtime list --json`:stdout 輸出 runtime 陣列 JSON、exit 0;無註冊時輸出 `[]`(非文字 `(no registered runtimes)`)
+- `runtime status <target> --json`:stdout 輸出單一 runtime 狀態 JSON 物件、exit 0
+- 時間戳一律 RFC3339;`last_sync_at` 尚未同步時輸出空字串 `""`(不輸出零值 `0001-01-01…`)
+- **結構化錯誤**:`--json` 模式失敗時 stdout 不輸出成功 payload,stderr 輸出單一錯誤物件 `{"error":{"code","message"}}`、非零 exit。`code` 以 `runtime_not_found`(target 未註冊)/ `state_not_found`(已註冊但無 state.yaml)/ `internal`(其他失敗)分類,exit code 維持現行(非零即可),不新增 exit code 方案
+- **向後相容**:`--json` 為 opt-in;未帶時所有現行文字輸出與 exit 行為不變
+
+JSON 契約的完整欄位對映與型別見 [D08 §3.4](../../designs/D08-runtime-cli.md)。
+
 ## 不變量
 
 - config.yaml 為 `start` 自動維護的 runtime 註冊表(非執行必要);觀測 CLI 與 am 僅以其定位 runtime,不以其選擇啟動目標

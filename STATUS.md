@@ -44,6 +44,11 @@
   - **文件層**：README 重整（Architecture 先於 Features）+ 全 Gemini 敘述清除；AGENTS.md、R01/R02/R06、requirement.md、D01/D02/D03/D06/design-plan、unit-tests.md 皆已清理
   - **程式層**：刪 `internal/agent/gemini.go`；dispatcher.go 去 gemini 分支；config.go `agent.type` 校驗收斂為 `{claude}`；dispatcher_test.go / config_test.go 改為驗證「gemini 現為非法值應回錯」
   - **驗證**：`mise run build` ok、`go test ./...` 全通過、`golangci-lint run` 0 issues；`.go` 內 `gemini` 僅剩「非法值回錯」測試案例。尚未 commit
+- `docs/changes/change-add-json-output.md`（CH-004：`runtime list/status` 加 `--json` 結構化輸出）**✅ 文件 + 程式 + 測試全部完成**
+  - **文件層**：D08 §3.1/§3.4/§4/§6/§7（JSON 契約、DTO+json tag、`last_sync_at` 零值空字串、`{"error":{"code,message}}` 錯誤物件與 `runtime_not_found`/`state_not_found`/`internal` 三 code、驗收案例 G/H）；R12 新增「`--json` 結構化輸出」段；README Observability 補 `--json` 說明；unit-tests.md 加 D08-11~13
+  - **程式層**：`query.go` — `RuntimeView` 加 json tag、`StatusView.MarshalJSON`（`LastSyncAt` 零值→`""`、非零→RFC3339）、新 sentinel `ErrStateNotFound` 包進 state.yaml 缺失錯誤；`cli.go` — `runRuntime` 加 `--json` 分支、`extractBoolFlag`（位置容忍：旗標在 target 前後皆可）、`printJSON`（stdout compact JSON）、`emitRuntimeError`+`newRuntimeErrorEnvelope`（error→code 分類、輸出至 stderr、非零 exit）
+  - **測試**：`json_test.go` D08-11（list 陣列／空→`[]`）、D08-12（status flat 物件、down、`last_sync_at`/`current_task` 空字串、非零 RFC3339）、D08-13（三 code + envelope marshal）、`extractBoolFlag` 位置容忍
+  - **驗證**：`go build`／`go test ./...` 全通過、`golangci-lint run` 0 issues；CLI 煙測 — `list --json`（有/空`[]`）、`status --json`（down、零值`""`、旗標前後）、錯誤（`runtime_not_found`/`state_not_found` 走 stderr、stdout 無 payload、exit 1）、text 模式不變 皆正確。尚未 commit
 - 工作區既有未提交改動：`internal/agent/claude.go`、`internal/daemon/syncer_test.go`、`internal/foundation/workspace.go`（先前 session in-progress）
 
 ## 後續架構調整（依你 review 確認）
