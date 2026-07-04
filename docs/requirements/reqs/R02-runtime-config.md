@@ -58,14 +58,14 @@ source:
 
 ### `local`
 
-對接 agent-manager (am):讀本地統一 ticket inbox,依自身 label 認領 ticket。
+對接 agent-manager (am):讀本地統一 ticket inbox,認領自身 label 且 `status == queued` 的 ticket。
 
 ```yaml
 source:
   type: "local"
   path: "~/.am/tickets"           # am 的統一 ticket inbox
   filter:
-    label: "<this-worker-label>"  # 僅認領此 label 的 ticket
+    label: "<this-worker-label>"  # 僅認領此 label 且 status=queued 的 ticket
   sync_interval: "30s"
 ```
 

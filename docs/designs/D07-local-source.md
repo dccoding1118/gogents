@@ -56,7 +56,7 @@ graph LR
 
 - **B1 SourceProbe.CheckSource**：確認 `source.path`（預設 `~/.am/tickets`）存在且可讀（`os.Stat` + 可列目錄）；失敗回永久錯誤並附人話 reason。
 - **B2 TaskSource.Kind**：固定回傳 `local`。
-- **B3 TaskSource.List**：列出 `source.path` 下 `*.yaml`，解析各 ticket，僅回傳 `worker == cfg.source.filter.label` 者；映射為 `[]SourceTask`，`TaskID` = ticket `id`。單一 ticket 解析失敗不中斷整輪，記 `source.ticket_parse_failed` 後略過。
+- **B3 TaskSource.List**：列出 `source.path` 下 `*.yaml`，解析各 ticket，僅回傳同時滿足 `worker == cfg.source.filter.label` **且** `status == "queued"` 者；過濾順序先 label 後 status。`status` 是 am 的 dispatch 閘門——`blocked` / `done` / `failed` / `awaiting_review` / 空 / 未知一律不認領（am 一律寫入 `status`，正常 ticket 皆有值）。映射為 `[]SourceTask`，`TaskID` = ticket `id`。單一 ticket 解析失敗不中斷整輪，記 `source.ticket_parse_failed` 後略過。被認領、執行中的 ticket 其 am `status` 仍為 `queued`（gogents 於 `processing_started` 不回寫），會持續出現在 List，由上游「以 task id 去重」吸收，不重複執行；終態回寫後 `status != queued` 即自動不再回傳。
 - **B4 TaskSource.Get**：以 task_id 定位 `<source.path>/<id>.yaml`；檔案不存在 → `ErrSourceNotFound`（對應 am 刪除 ticket）；讀取 / 解析失敗 → `ErrSourceTransient`（下輪重試，保守）。
 - **B5 錯誤分類**：本模組只產生 `ErrSourceNotFound`（檔案不存在）與 `ErrSourceTransient`（IO / 解析）；無 `ErrSourceAuth`（本地檔案無授權概念）。與 D02 抽象錯誤對齊，Syncer 邏輯不需區分來源。
 - **B6 TaskContentFetcher.Fetch**：讀 ticket 的 `goal`（→ Title）與 `context`（→ Body）組 `TaskContent`；`Comments` 恆為空；`Author` 取 ticket 的 mission 或固定 `am`。原始文字不翻譯。
@@ -74,7 +74,7 @@ graph LR
 | `id`          | `SourceTask.TaskID`           | 原樣（task_id = ticket id）  |
 | `worker`      | 過濾鍵                        | 與 `filter.label` 比對       |
 | `updated_at`  | `SourceTask.UpdatedAt`        | RFC3339                      |
-| `status`      | （不映射為 SourceTask.State） | 由 gogents 回寫;讀時輔助判定 |
+| `status`      | List 認領閘門（僅 `queued`）  | 不映射為 SourceTask.State;List 讀取過濾、終態由 gogents 回寫 |
 | `goal`        | `TaskContent.Title`           | input.md 標題                |
 | `context`     | `TaskContent.Body`            | input.md 內容                |
 | `verify.cmd`  | `VerifySpec.Cmd`              | 無則 fallback                |
@@ -125,7 +125,8 @@ List(ctx, filter):
   for e in entries:
      t, err := parseTicket(e)
      if err != nil: emit "source.ticket_parse_failed" {path, reason}; continue
-     if t.Worker != filter.Labels[0]: continue          // 依 label 認領
+     if t.Worker != filter.Labels[0]: continue          // 先依 label 認領
+     if t.Status != "queued": continue                  // 再依 am dispatch 閘門(僅 queued)
      out += mapToSourceTask(t)
   return out, nil
 
@@ -184,7 +185,7 @@ Report(ctx, in):
 | 契約 / 行為                | 由哪個模組驗收 | 預期觀察點                                                              |
 | -------------------------- | -------------- | ---------------------------------------------------------------------- |
 | B1 SourceProbe             | D02 啟動序列   | `source.path` 不存在時 `config.preflight_failed {stage=source}`        |
-| B2–B5 TaskSource List/Get  | D02 sync       | 於 `~/.am/tickets/` 放一張本 label 的 ticket → `sync.task_created`;刪除 ticket → `sync.task_deleted` |
+| B2–B5 TaskSource List/Get  | D02 sync       | 於 `~/.am/tickets/` 放一張本 label 且 `status: queued` 的 ticket → `sync.task_created`;`status: blocked`（或其他非 queued）者不觸發;刪除 ticket → `sync.task_deleted` |
 | B6 ContentFetcher          | D03 執行       | input.md 內含 ticket `goal` / `context`;無 Comments 段                 |
 | B7 TaskVerifier            | D03 執行       | ticket 宣告 `verify.cmd` → `task.verifying` / `task.verified`;未宣告走 result.json |
 | B8/B9 FeedbackReporter     | D03 執行       | 任務終態後 ticket 檔 `status` 轉 `done`/`failed`、`result` 依型別寫入、`updated_at` 更新;治理欄位不變 |
