@@ -26,6 +26,10 @@
 | D01-18 | GlobalConfigStore | Upsert: 新 workspace 註冊                          | config.yaml `runtimes` 新增一筆 `{name, workspace, registered_at}`，無 `active_runtime` |
 | D01-19 | GlobalConfigStore | Upsert: 同 workspace 路徑重複註冊                  | 以 workspace 為 key 覆蓋更新 `name` / `registered_at`，不新增第二筆 |
 | D01-20 | GlobalConfigStore | Resolve: 以 workspace 路徑或 name 反查            | 路徑精確匹配；同 name 多筆時回 `registered_at` 最近者；未註冊回 `ErrRuntimeNotRegistered` |
+| D01-21 | 全域家目錄根 | 設定 `GOGENTS_HOME` 時的全域路徑解析              | `GlobalConfigYaml()` 與 `LogsDir()`（含 config.yaml、logs）皆指向 `$GOGENTS_HOME` 底下；`GlobalConfigPath()` 與之一致 |
+| D01-22 | 全域家目錄根 | 未設定 `GOGENTS_HOME` 時的全域路徑解析            | 全域路徑回退為 `$HOME/.gogents`（既有行為）；per-workspace `.gogents/` 路徑不受影響 |
+| D01-23 | GlobalConfigStore | Remove: 以 workspace 路徑或 name 移除            | 命中該筆自 `runtimes[]` 消失、其餘不動、原子寫回；以 name 多筆時同 `Resolve` 規則定位 |
+| D01-24 | GlobalConfigStore | Remove: 目標未註冊                              | 回 `ErrRuntimeNotRegistered`，config.yaml 內容不變 |
 
 ## D02 Daemon-Sync (同步與維護模組)
 
@@ -150,3 +154,5 @@
 | D08-11 | JSON list     | `runtime list --json`：多筆／空                | 多筆輸出 JSON 陣列；無註冊輸出 `[]`（非文字）、exit 0                               |
 | D08-12 | JSON status   | `runtime status --json`：含 `down`／空欄位     | 單一 JSON 物件；pid 不存活 `runtime_state=down`、`alive=false`；`last_sync_at` 未同步為 `""`、`current_task` 空為 `""` |
 | D08-13 | JSON error    | `--json` 失敗：各 `code`                       | stderr 輸出 `{"error":{"code,message}}`、stdout 無 payload、exit ≠ 0；`runtime_not_found` / `state_not_found` / `internal` 各命中 |
+| D08-14 | Remove        | runtime remove：命中                          | 目標自 config.yaml `runtimes[]` 移除、其餘不動；logs/ 與 workspace `.gogents/` 不受影響 |
+| D08-15 | Remove        | runtime remove：目標未註冊                     | 回 `ErrRuntimeNotRegistered`、exit ≠ 0；config.yaml 不被改動 |

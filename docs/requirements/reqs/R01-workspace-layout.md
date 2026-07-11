@@ -29,7 +29,7 @@
 ```
 
 ## 全域目錄結構
-位於使用者 home 下，跨所有 workspace 共用。
+跨所有 workspace 共用，位於**全域家目錄根**下（下方以預設值 `~/.gogents/` 表示）。
 ```
 ~/.gogents/
 ├── config.yaml                   # 全域設定（見 R02）
@@ -40,6 +40,18 @@
 ```
 
 `<workspace-hash>` 為 workspace 絕對路徑的短雜湊（建議 SHA1 前 8 碼），用來區分不同 workspace 的 daemon 日誌，避免互相覆蓋。
+
+### 全域家目錄根解析（`GOGENTS_HOME`）
+
+全域家目錄根由單一來源解析，`config.yaml` 與 `logs/` 皆據此推導：
+
+1. 環境變數 `GOGENTS_HOME` 非空 → 逕用其值。
+2. 否則 → `$HOME/.gogents`（預設，向後相容）。
+3. `$HOME` 亦無法解析時 → `/tmp` fallback。
+
+`GOGENTS_HOME` 讓同一台機器可各持獨立的全域註冊表與日誌（例如 dev 綁 sandbox、prod 綁營運目錄互不污染），與 agent-manager (am) 的 `AM_HOME` 對稱。
+
+**per-workspace 的 `.gogents/`**（`runtime.yaml` / `state.yaml` / `tasks/`）位於 workspace 目錄之下、屬相對路徑，**不受 `GOGENTS_HOME` 影響**，不隨全域家目錄根移動。
 
 ## 任務代號（task-id）格式
 

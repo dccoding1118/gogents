@@ -17,21 +17,20 @@ import (
 var ErrRuntimeNotRegistered = errors.New("runtime not found in ~/.gogents/config.yaml")
 
 // GlobalConfigStore reads and maintains the runtime registry at
-// ~/.gogents/config.yaml (R12). `gogents start` calls Upsert; the observability
-// CLI calls Load / Resolve. Upsert is keyed by workspace path.
+// <global-home>/config.yaml (R12). `gogents start` calls Upsert; the
+// observability CLI calls Load / Resolve; `gogents runtime remove` calls Remove.
+// Upsert and Remove are keyed by workspace path (see Resolve's matching rule).
 type GlobalConfigStore interface {
 	Load() (GlobalConfig, error)
 	Upsert(reg RuntimeRegistration) error
 	Resolve(workspaceOrName string) (RuntimeRegistration, error)
+	Remove(workspaceOrName string) error
 }
 
-// GlobalConfigPath returns the canonical ~/.gogents/config.yaml path.
+// GlobalConfigPath returns the config.yaml path under the global home root
+// (GlobalHome; overridable via GOGENTS_HOME).
 func GlobalConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = "/tmp"
-	}
-	return filepath.Join(home, ".gogents", "config.yaml")
+	return filepath.Join(GlobalHome(), "config.yaml")
 }
 
 type globalConfigStore struct {
@@ -97,29 +96,49 @@ func (s *globalConfigStore) Resolve(workspaceOrName string) (RuntimeRegistration
 	if err != nil {
 		return RuntimeRegistration{}, err
 	}
+	idx := matchRuntimeIndex(gc.Runtimes, workspaceOrName)
+	if idx < 0 {
+		return RuntimeRegistration{}, ErrRuntimeNotRegistered
+	}
+	return gc.Runtimes[idx], nil
+}
 
-	// Exact workspace path match wins (the primary key).
-	for _, r := range gc.Runtimes {
-		if r.Workspace == workspaceOrName {
-			return r, nil
+func (s *globalConfigStore) Remove(workspaceOrName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	gc, err := s.loadUnlocked()
+	if err != nil {
+		return err
+	}
+	idx := matchRuntimeIndex(gc.Runtimes, workspaceOrName)
+	if idx < 0 {
+		return ErrRuntimeNotRegistered
+	}
+	gc.Runtimes = append(gc.Runtimes[:idx], gc.Runtimes[idx+1:]...)
+	return s.atomicWrite(gc)
+}
+
+// matchRuntimeIndex applies the registry lookup rule shared by Resolve and
+// Remove: an exact workspace-path match wins (the primary key); otherwise match
+// by name, picking the most recently registered when several share a name (e.g.
+// a workspace deleted and recreated at a new path). Returns -1 when no match.
+func matchRuntimeIndex(runtimes []RuntimeRegistration, workspaceOrName string) int {
+	for i := range runtimes {
+		if runtimes[i].Workspace == workspaceOrName {
+			return i
 		}
 	}
-
-	// Otherwise match by name; pick the most recently registered when several
-	// share a name (e.g. a workspace deleted and recreated at a new path).
-	var best *RuntimeRegistration
-	for i := range gc.Runtimes {
-		if gc.Runtimes[i].Name != workspaceOrName {
+	best := -1
+	for i := range runtimes {
+		if runtimes[i].Name != workspaceOrName {
 			continue
 		}
-		if best == nil || gc.Runtimes[i].RegisteredAt >= best.RegisteredAt {
-			best = &gc.Runtimes[i]
+		if best < 0 || runtimes[i].RegisteredAt >= runtimes[best].RegisteredAt {
+			best = i
 		}
 	}
-	if best != nil {
-		return *best, nil
-	}
-	return RuntimeRegistration{}, ErrRuntimeNotRegistered
+	return best
 }
 
 func (s *globalConfigStore) loadUnlocked() (GlobalConfig, error) {

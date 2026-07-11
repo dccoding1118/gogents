@@ -114,9 +114,11 @@ bin/gogents start --workspace /path/to/workspace
 
 The daemon will:
 1. Validate config & run preflight checks (git, source toolchain, agent CLI)
-2. Initialize workspace directory structure and register the runtime into `~/.gogents/config.yaml`
+2. Initialize workspace directory structure and register the runtime into the global registry (`<GOGENTS_HOME>/config.yaml`)
 3. Enter the sync loop — poll → execute → verify → report → repeat
 4. Shut down gracefully on `SIGTERM` / `SIGINT`
+
+**Global home (`GOGENTS_HOME`)** — the global registry (`config.yaml`) and daemon logs (`logs/<workspace-hash>/`) live under a single global-home root, resolved as: `$GOGENTS_HOME` if set, else `$HOME/.gogents` (default). Set `GOGENTS_HOME` to keep independent registries/logs on one machine (e.g. dev vs prod), mirroring agent-manager's `AM_HOME`. The per-workspace `.gogents/` (runtime.yaml / state.yaml / tasks/) is unaffected.
 
 ### Observability
 
@@ -130,6 +132,10 @@ bin/gogents runtime status <workspace|name>
 
 # Print a runtime's logs (daemon.jsonl / error.jsonl)
 bin/gogents logs <workspace|name>
+
+# Unregister a retired/test runtime from the global registry (config.yaml only;
+# leaves the runtime's logs and workspace .gogents/ intact, does not stop the daemon)
+bin/gogents runtime remove <workspace|name>
 ```
 
 `runtime list` and `runtime status` accept an opt-in `--json` flag for a stable machine-readable contract (used by the am adapter): a runtime array or a single status object on stdout, and a structured `{"error":{"code","message"}}` object on stderr with a non-zero exit on failure. Timestamps are RFC3339; an empty `last_sync_at` is `""`. Without `--json` the text output is unchanged.

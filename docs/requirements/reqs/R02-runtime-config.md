@@ -98,7 +98,7 @@ ticket 檔為 YAML,欄位由 am 定義;gogents 僅讀執行所需欄位並回寫
 
 ## config.yaml
 
-位置:`~/.gogents/config.yaml`
+位置:`<全域家目錄根>/config.yaml`(全域家目錄根預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫,見 R01)
 職責:全域 runtime 註冊表,供觀測 CLI(`gogents runtime list/status`、`gogents logs`,見 R12)與 am 定位各 worker。**由 `gogents start` 自動維護**,非人工撰寫。
 
 ```yaml

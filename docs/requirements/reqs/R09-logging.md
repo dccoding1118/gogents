@@ -16,7 +16,7 @@
 └── error.jsonl      # 錯誤日誌(error 事件的複本)
 ```
 
-`<workspace-hash>` 為 workspace 絕對路徑的 SHA1 前 8 碼(見 R01)。
+全域家目錄根預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫(見 R01);`logs/` 隨之移動。`<workspace-hash>` 為 workspace 絕對路徑的 SHA1 前 8 碼(見 R01)。
 
 ### 雙檔案分流
 

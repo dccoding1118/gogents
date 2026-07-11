@@ -53,6 +53,12 @@
   - **文件層**：README（Pluggable Task Sources、am 整合節）、R02（local 認領條件 + config 註解）、R11（ticket 欄位表 `status` 改讀/寫、掃描與認領過濾規則 + 執行中不重領說明、am/gogents 分工）、D07（B3 List、§3.1 `status` 映射、§5.1 List pseudo-code、§7.1 驗收表）、requirement.md 路線圖、unit-tests.md（D07-01a/01b）皆已對齊「先 label 後 `status==queued`」
   - **程式層**：`internal/source/local.go` `List` 在 label 過濾後追加 `t.Status != "queued"` 過濾（am dispatch 閘門）；`local_test.go` 既有 `TestLocalSource_List` fixtures 補 `status: queued`，新增 `TestLocalSource_ListStatusGate`（D07-01a：僅 queued 認領、blocked/done/failed/awaiting_review/缺失/空皆略過）與 `TestLocalSource_ListLabelStatusCross`（D07-01b：label × status 交叉）
   - **驗證**：`go build ./...`、`go test ./...` 全通過、`golangci-lint run ./internal/source/...` 0 issues、`go vet` clean。尚未 commit
+- `docs/changes/change-configurable-home.md`（CH-006：全域家目錄可配置化 + `runtime remove`）**文件 + 程式 + 測試全部完成。尚未 commit**
+  - **範圍**：只保留 `GOGENTS_HOME` 一個 env 變數（§3.4 結論：不新增其他 env、不導入 `.env` 載入機制）；`runtime remove` 由選配升為 in-scope
+  - **程式（本 session 完成）**：新 `internal/foundation/home.go` `GlobalHome()`（單一 home 解析，`GOGENTS_HOME`→`$HOME/.gogents`→`/tmp/.gogents`）；`workspace.go`（`NewWorkspacePaths` 改用 `GlobalHome()`，刪除自有 `os.UserHomeDir` 分支）與 `global_config.go`（`GlobalConfigPath()` 改用 `GlobalHome()`）改共用之。`global_config.go` 加 `GlobalConfigStore.Remove`（介面 + 實作）；`Resolve` 與 `Remove` 抽共用 `matchRuntimeIndex`（workspace 路徑優先、否則 name 取最近）。`internal/cli/cli.go` 加 `runtime remove` 分支 + `Remove` wrapper。`daemon_test.go` mockGlobalConfig 補 `Remove`
+  - **測試**：D01-21/22（`home_test.go` GOGENTS_HOME override / 預設回退 + per-workspace 不受影響）、D01-23/24（`global_config_test.go` Remove 命中/未命中）、D08-14/15（`cli/remove_test.go` 經 `Dispatch` 全鏈 + GOGENTS_HOME 整合）
+  - **驗證**：`go build`／`go test ./...` 全通過、`golangci-lint run` 0 issues、`go vet` clean；CLI 煙測（GOGENTS_HOME 覆寫下 config.yaml 落在覆寫目錄、`runtime remove` 命中改寫/未命中 exit 1）皆正確
+  - **文件對齊（前幾輪）**：GOGENTS_HOME → R01/D01 canonical + R02/R09/R12/requirement.md/README/AGENTS；runtime remove → R12/D08/D01/README/AGENTS/unit-tests
 - 工作區既有未提交改動：`internal/agent/claude.go`、`internal/daemon/syncer_test.go`、`internal/foundation/workspace.go`（先前 session in-progress）
 
 ## 後續架構調整（依你 review 確認）
