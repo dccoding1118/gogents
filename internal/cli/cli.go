@@ -43,11 +43,12 @@ func Dispatch(args []string) int {
 	}
 }
 
-// runRuntime handles `gogents runtime list` and `gogents runtime status <target>`.
-// Both accept an opt-in `--json` flag (position-tolerant, D08 §3.4).
+// runRuntime handles `gogents runtime list`, `gogents runtime status <target>`,
+// and `gogents runtime remove <target>`. list/status accept an opt-in `--json`
+// flag (position-tolerant, D08 §3.4); remove does not.
 func runRuntime(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: gogents runtime <list|status> [target] [--json]")
+		fmt.Fprintln(os.Stderr, "usage: gogents runtime <list|status|remove> [target] [--json]")
 		return 1
 	}
 	sub := args[0]
@@ -92,10 +93,29 @@ func runRuntime(args []string) int {
 		fmt.Printf("last_sync:     %s (%s)\n", view.LastSyncAt.Format("2006-01-02 15:04:05 -07:00"), view.LastSyncStatus)
 		return 0
 
+	case "remove":
+		if len(rest) < 1 {
+			fmt.Fprintln(os.Stderr, "usage: gogents runtime remove <workspace|name>")
+			return 1
+		}
+		if err := Remove(gcfg, rest[0]); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("removed runtime %q from registry\n", rest[0])
+		return 0
+
 	default:
 		fmt.Fprintf(os.Stderr, "unknown runtime subcommand: %s\n", sub)
 		return 1
 	}
+}
+
+// Remove unregisters the target runtime from config.yaml (R12 / D08 B7). It only
+// touches the registry — not the runtime's logs, its workspace .gogents/, or its
+// daemon. Returns foundation.ErrRuntimeNotRegistered when the target is unknown.
+func Remove(gcfg foundation.GlobalConfigStore, target string) error {
+	return gcfg.Remove(target)
 }
 
 // extractBoolFlag removes every occurrence of --name/-name from args and reports

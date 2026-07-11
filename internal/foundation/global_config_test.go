@@ -76,6 +76,51 @@ func TestGlobalConfigStore_Resolve(t *testing.T) {
 	})
 }
 
+func TestGlobalConfigStore_Remove(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	store := NewGlobalConfigStoreAt(path)
+	_ = store.Upsert(RuntimeRegistration{Name: "dup", Workspace: "/ws/old", RegisteredAt: "2026-01-01T00:00:00Z"})
+	_ = store.Upsert(RuntimeRegistration{Name: "dup", Workspace: "/ws/new", RegisteredAt: "2026-05-05T00:00:00Z"})
+	_ = store.Upsert(RuntimeRegistration{Name: "solo", Workspace: "/ws/solo", RegisteredAt: "2026-01-01T00:00:00Z"})
+
+	t.Run("D01-23 remove by workspace path leaves the rest intact", func(t *testing.T) {
+		if err := store.Remove("/ws/solo"); err != nil {
+			t.Fatalf("remove by path: %v", err)
+		}
+		gc, _ := store.Load()
+		if len(gc.Runtimes) != 2 {
+			t.Fatalf("expected two runtimes left, got %d", len(gc.Runtimes))
+		}
+		for _, r := range gc.Runtimes {
+			if r.Workspace == "/ws/solo" {
+				t.Fatalf("/ws/solo should be gone, got %+v", gc.Runtimes)
+			}
+		}
+	})
+
+	t.Run("D01-23 remove by name picks latest (same rule as Resolve)", func(t *testing.T) {
+		if err := store.Remove("dup"); err != nil {
+			t.Fatalf("remove by name: %v", err)
+		}
+		gc, _ := store.Load()
+		if len(gc.Runtimes) != 1 || gc.Runtimes[0].Workspace != "/ws/old" {
+			t.Fatalf("expected only /ws/old left (latest /ws/new removed), got %+v", gc.Runtimes)
+		}
+	})
+
+	t.Run("D01-24 remove unregistered target", func(t *testing.T) {
+		gcBefore, _ := store.Load()
+		err := store.Remove("missing")
+		if !errors.Is(err, ErrRuntimeNotRegistered) {
+			t.Fatalf("expected ErrRuntimeNotRegistered, got %v", err)
+		}
+		gcAfter, _ := store.Load()
+		if len(gcAfter.Runtimes) != len(gcBefore.Runtimes) {
+			t.Fatalf("registry must not change on miss: before %d after %d", len(gcBefore.Runtimes), len(gcAfter.Runtimes))
+		}
+	})
+}
+
 func TestGlobalConfigPath(t *testing.T) {
 	if p := GlobalConfigPath(); filepath.Base(p) != "config.yaml" {
 		t.Errorf("expected .../config.yaml, got %s", p)

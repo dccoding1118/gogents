@@ -48,16 +48,10 @@ func NewWorkspacePaths(workspaceDir string) WorkspacePaths {
 	h.Write([]byte(absDir))
 	hashStr := hex.EncodeToString(h.Sum(nil))[:8]
 
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		// Fallback
-		home = "/tmp"
-	}
-
 	return &defaultWorkspacePaths{
 		workspaceDir: absDir,
 		hash:         hashStr,
-		globalHome:   filepath.Join(home, ".gogents"),
+		globalHome:   GlobalHome(),
 	}
 }
 

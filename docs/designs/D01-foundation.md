@@ -10,7 +10,7 @@ foundation 是系統最底層的資料與設定層，對外暴露三個核心能
 - **被依賴者**：D02（daemon-sync）在啟動、sync tick、重啟恢復時使用；D03（task-execution）在狀態轉換、artifact 路徑解析時使用。
 - **依賴者**：僅依賴 D04（logger）輸出事件。不直接依賴 D05 / D06。
 - **工具鏈檢查委派**：本模組定義 `ToolchainProbe` 介面，但不實作 source / agent 的具體檢查。D02 組裝啟動流程時，由 D05（github-client）提供 source 檢查、D06（agent-runner）提供 agent 檢查；git 檢查由 D01 內建（最小能力：`git --version`、workspace 是否為 git repo）。
-- **I/O 邊界**：僅觸及 `<workspace>/.gogents/` 與 `~/.gogents/`；不呼叫任何外部 CLI（除內建 git probe）。
+- **I/O 邊界**：僅觸及 `<workspace>/.gogents/` 與全域家目錄根（預設 `~/.gogents/`，可經 `GOGENTS_HOME` 覆寫，見 §3）；不呼叫任何外部 CLI（除內建 git probe）。
 
 ```mermaid
 %%{init: {'theme':'dark'}}%%
@@ -67,6 +67,14 @@ graph LR
 
 `workspace-hash` = `sha1(absolute workspace path)` 前 8 碼（hex）。
 
+全域路徑（`GlobalConfigYaml()`、`LogsDir()` 及其下的日誌檔）皆掛在**全域家目錄根**下。此根由**單一 home 解析函式**（本模組內部）產出，供 `WorkspacePaths` 與 `GlobalConfigStore` 共用，避免兩處各自推導而指向不同目錄。解析順序：
+
+1. 環境變數 `GOGENTS_HOME` 非空 → 逕用其值。
+2. 否則 → `$HOME/.gogents`（預設，向後相容）。
+3. `$HOME` 亦無法解析時 → `/tmp` fallback。
+
+下表以預設值 `~/.gogents/` 表示全域家目錄根。per-workspace 的 `.gogents/`（`runtime.yaml` / `state.yaml` / `tasks/`）為相對路徑，不受 `GOGENTS_HOME` 影響。
+
 | 路徑方法             | 對應檔案 / 目錄                                | 寫入者          |
 | -------------------- | ---------------------------------------------- | --------------- |
 | `Root()`             | `<workspace>/`                                 | -               |
@@ -114,7 +122,7 @@ graph LR
 
 **GlobalConfig（`~/.gogents/config.yaml`）**
 
-全域 runtime 註冊表；由 D08（`gogents start`）於啟動時 upsert 寫入，供觀測 CLI 與 am 定位 runtime。**不含 `active_runtime` 欄位**。
+全域 runtime 註冊表；由 D08（`gogents start`）於啟動時 upsert 寫入、由 D08（`gogents runtime remove`）反註冊移除，供觀測 CLI 與 am 定位 runtime。**不含 `active_runtime` 欄位**。
 
 | 欄位                        | 型別                    | 說明                                    |
 | --------------------------- | ----------------------- | --------------------------------------- |
@@ -193,12 +201,15 @@ type TaskPatch struct {
 
 var ErrIllegalTransition = errors.New("illegal task state transition")
 
-// 全域 runtime 註冊表存取（~/.gogents/config.yaml）；由 D08 start 呼叫 Upsert，
-// 由觀測 CLI（D08）呼叫 Load / Resolve。upsert 以 workspace 路徑為主鍵。
+// 全域 runtime 註冊表存取（<global-home>/config.yaml，全域家目錄根預設 ~/.gogents，
+// 可經 GOGENTS_HOME 覆寫；路徑取自與 WorkspacePaths 共用的 home 解析函式）；
+// 由 D08 start 呼叫 Upsert，由觀測 CLI（D08）呼叫 Load / Resolve；由 D08 runtime remove 呼叫 Remove。
+// upsert 以 workspace 路徑為主鍵。
 type GlobalConfigStore interface {
     Load() (GlobalConfig, error)                       // 檔案不存在回零值 + nil error
     Upsert(reg RuntimeRegistration) error              // 以 reg.Workspace 為 key 覆蓋或新增；原子寫入
     Resolve(workspaceOrName string) (RuntimeRegistration, error) // 供 CLI 以 workspace 路徑或 name 反查
+    Remove(workspaceOrName string) error               // 以 Resolve 規則定位並自 runtimes[] 移除；原子寫入；未命中回 ErrRuntimeNotRegistered
 }
 
 type GlobalConfig struct {

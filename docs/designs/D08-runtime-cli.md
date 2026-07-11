@@ -2,21 +2,21 @@
 
 涵蓋需求：R12（Runtime 註冊與觀測）。
 
-本模組提供 `gogents` 的 runtime 註冊與觀測介面：`gogents start` 於啟動時將 runtime 註冊寫入 `~/.gogents/config.yaml`（以 workspace 路徑為 key）；`gogents runtime list` / `gogents runtime status` / `gogents logs` 供使用者與 agent-manager (am) 列出、查詢、匯出 runtime 狀態與日誌。am 不維護執行狀態副本,一律經此介面查詢（單向 `am → gogents`）。
+本模組提供 `gogents` 的 runtime 註冊與觀測介面：`gogents start` 於啟動時將 runtime 註冊寫入 config.yaml（位於全域家目錄根,預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫,見 D01 §3;以 workspace 路徑為 key）；`gogents runtime list` / `gogents runtime status` / `gogents logs` 供使用者與 agent-manager (am) 列出、查詢、匯出 runtime 狀態與日誌；`gogents runtime remove` 供 am 從註冊表反註冊退役／測試 runtime,取代手改 config.yaml。am 不維護執行狀態副本,一律經此介面查詢（單向 `am → gogents`）。
 
 ## 1. 模組架構與周邊模組關聯
 
-runtime-cli 是**唯讀觀測層 + 註冊寫入點**。註冊寫入的實際落檔由 D01 `GlobalConfigStore` 執行；本模組定義 `start` 呼叫它的時機（D02 §5.1 啟動序列）與三個查詢子指令。查詢一律讀既有檔案（config.yaml / state.yaml / logs），不改變 daemon 執行行為。
+runtime-cli 是**唯讀觀測層 + 註冊表寫入點**。註冊表的實際落檔由 D01 `GlobalConfigStore` 執行；本模組定義 `start` 呼叫它註冊的時機（D02 §5.1 啟動序列）、三個唯讀查詢子指令,以及 `runtime remove` 反註冊子指令。查詢一律讀既有檔案（config.yaml / state.yaml / logs），不改變 daemon 執行行為;寫入僅發生於 `start` 註冊與 `runtime remove` 反註冊,且都只動 config.yaml 註冊表。
 
 **實作套件**：所有子指令（`start` / `runtime list` / `runtime status` / `logs`）集中於 `internal/cli` 命令層——`cli.Dispatch` 依 `os.Args` 分派，`cmd/gogents/main.go` 僅為薄進入點。本文件（D08）規範 R12 的註冊與觀測子指令；`start` 的生命週期行為屬 D02，`internal/cli` 內僅承載其組裝（composition root）接線。
 
 - **依賴**
-  - **D01 foundation**：`GlobalConfigStore`（Load / Upsert / Resolve，見 D01 §4）;`WorkspacePaths`（推 workspace-hash → logs 路徑、state.yaml 路徑）。
+  - **D01 foundation**：`GlobalConfigStore`（Load / Upsert / Resolve / Remove，見 D01 §4）;`WorkspacePaths`（推 workspace-hash → logs 路徑、state.yaml 路徑）。
   - **D02 daemon-sync**：`StateStore.Load`（讀 `state.yaml` 的 `runtime_state` / `daemon.pid` / `current_task` / `sync`）。
   - **D04 logger**：`gogents start` 已開 logger;查詢子指令為短命 CLI,直接輸出 stdout,不寫 daemon 日誌。
   - **OS**：pid 存活檢核（`kill(pid, 0)` 或讀 `/proc/<pid>`）。
 - **被依賴**：CLI 入口 `cmd/gogents`;am 以子行程呼叫本模組的三個查詢子指令。
-- **I/O 邊界**：讀 `~/.gogents/config.yaml`、`<workspace>/.gogents/state.yaml`、`~/.gogents/logs/<hash>/*.jsonl`;寫 `~/.gogents/config.yaml`（僅 `start` 的 upsert）。
+- **I/O 邊界**：讀 `~/.gogents/config.yaml`、`<workspace>/.gogents/state.yaml`、`~/.gogents/logs/<hash>/*.jsonl`;寫 `~/.gogents/config.yaml`（`start` 的 upsert 與 `runtime remove` 的移除）。（全域家目錄根預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫。）
 
 ```mermaid
 %%{init: {'theme':'dark'}}%%
@@ -45,8 +45,9 @@ graph LR
 - **B2 runtime list**：`Load` config.yaml,列出所有 `runtimes`（`workspace` / `name` / `registered_at`）;不檢核 pid、不讀 state.yaml。config.yaml 不存在 → 輸出空列表 + exit 0。
 - **B3 runtime status <workspace|name>**：以參數 `Resolve` 出 workspace → 讀該 workspace 的 `state.yaml` → 輸出 `runtime_state` / `pid` / `current_task` / `last_sync`。**查詢時檢核 pid**:`daemon.pid` 不存活 → 輸出 `runtime_state: down`（覆蓋 state.yaml 殘留值）。找不到註冊或 state.yaml → exit ≠ 0 + 明確訊息。
 - **B4 logs <workspace|name>**：`Resolve` → 推 `~/.gogents/logs/<hash>/` → 輸出 `daemon.jsonl`（預設）;供 am `audit export` 併入。找不到 → exit ≠ 0。
-- **B5 name 反查規則**：參數可為 workspace 絕對路徑或 runtime name。以 name 指定且多筆同 name（不同 workspace）→ 取 `registered_at` 最近者;以 workspace 路徑指定則精確匹配（主鍵）。
-- **B6 唯讀不變量**：`list` / `status` / `logs` **不寫任何檔案**、不改 daemon 行為、不觸碰 task.yaml / state.yaml。僅 `start` 的 register 步驟寫 config.yaml。
+- **B5 name 反查規則**：參數可為 workspace 絕對路徑或 runtime name。以 name 指定且多筆同 name（不同 workspace）→ 取 `registered_at` 最近者;以 workspace 路徑指定則精確匹配（主鍵）。remove 的目標解析同此規則。
+- **B6 唯讀不變量**：`list` / `status` / `logs` **不寫任何檔案**、不改 daemon 行為、不觸碰 task.yaml / state.yaml。config.yaml 的寫入僅來自 `start` 的 register 與 `runtime remove` 的反註冊。
+- **B7 runtime remove <workspace|name>**：以 B5 規則 `Resolve` 出目標,呼叫 `GlobalConfigStore.Remove` 自 config.yaml 的 `runtimes[]` 移除該筆並原子寫回;其餘條目不動。**只動註冊表**:不觸碰該 runtime 的 `logs/`、workspace 內 `.gogents/`,不停止其 daemon。找不到目標 → exit ≠ 0 + `runtime_not_found`。
 
 ## 3. 資料結構
 
@@ -57,6 +58,7 @@ graph LR
 | `gogents runtime list`            | `--json`（可選）    | 列出所有已註冊 runtime            |
 | `gogents runtime status <target>` | `<workspace\|name>`;`--json`（可選） | 查單一 runtime 即時狀態           |
 | `gogents logs <target>`           | `<workspace\|name>`;`--error`（可選,輸出 error.jsonl） | 輸出 runtime 日誌 |
+| `gogents runtime remove <target>` | `<workspace\|name>`  | 從註冊表移除該 runtime            |
 
 `--json` 為 `runtime list` 與 `runtime status` 各自的布林旗標,位置容忍度比照現行 flag 解析（`runtime status <target> --json` 與 `runtime status --json <target>` 皆可,與 `logs --error` 一致）。`logs` 無 `--json`（維持 JSONL 直通）。
 
@@ -152,6 +154,9 @@ func Status(gcfg foundation.GlobalConfigStore, target string) (StatusView, error
 // Logs 對應 gogents logs;回傳日誌檔路徑供 CLI 串流輸出。
 func Logs(gcfg foundation.GlobalConfigStore, paths foundation.WorkspacePaths, target string, errOnly bool) (logPath string, err error)
 
+// Remove 對應 gogents runtime remove;以 B5 規則解析 target 後自註冊表移除。
+func Remove(gcfg foundation.GlobalConfigStore, target string) error
+
 type RuntimeView struct {
     Name         string `json:"name"`
     Workspace    string `json:"workspace"`
@@ -215,6 +220,15 @@ Logs(gcfg, _, target, errOnly):
   // CLI 層負責 open + 串流至 stdout（tail / cat 語義由實作決定）
 ```
 
+### 5.4 runtime remove
+
+```
+Remove(gcfg, target):
+  return gcfg.Remove(target)         // 內部以 Resolve 規則定位 → 移除該筆 → 原子寫回
+  // 命中即移除;未命中回 ErrRuntimeNotRegistered（CLI 層對映 exit ≠ 0 / runtime_not_found）
+  // 只動 config.yaml 註冊表,不觸碰 logs/ 或 workspace 內 .gogents/
+```
+
 ## 6. 錯誤處理
 
 | 情境                                  | 分類     | 處理                                                       |
@@ -225,6 +239,8 @@ Logs(gcfg, _, target, errOnly):
 | status pid 不存活                     | 正常     | `runtime_state: down`;exit 0（查詢本身成功）                |
 | name 多筆同名                         | 歧義     | 取 `registered_at` 最近者;（可選）warning 提示以 workspace 精確指定 |
 | logs 日誌檔不存在                     | 使用者錯 | exit ≠ 0;訊息指出該 runtime 尚無日誌                       |
+| remove 目標未註冊                     | 使用者錯 | exit ≠ 0 + `runtime_not_found`;不改動 config.yaml          |
+| remove 寫回 config.yaml 失敗（磁碟 / 權限） | 暫時 | exit ≠ 0 + `internal`;註冊表維持原狀（原子寫入,無半寫）    |
 
 查詢子指令為短命 CLI,錯誤直接寫 stderr + 非零 exit,不寫 daemon.jsonl。以上為預設文字模式;`--json` 模式下同樣的失敗改以結構化錯誤物件（`error.code`,見 §3.4）輸出至 stderr,exit code 與文字模式相同。
 
@@ -248,6 +264,7 @@ Logs(gcfg, _, target, errOnly):
 | F    | `gogents logs $WS`                                      | 輸出該 runtime `daemon.jsonl` 內容;`--error` 輸出 `error.jsonl`                 |
 | G    | `gogents runtime list --json`                           | stdout 輸出 JSON 陣列;無註冊時輸出 `[]`、exit 0                                 |
 | H    | `gogents runtime status $WS --json`                     | stdout 輸出單一 JSON 物件（欄位如 §3.4）;`last_sync_at` 未同步時為 `""`          |
+| I    | `gogents runtime remove $WS` 後 `gogents runtime list`  | config.yaml `runtimes[]` 不再含 $WS 條目、其餘不動;`logs/` 與 workspace 內 `.gogents/` 皆保留 |
 
 ### 7.3 錯誤路徑
 
@@ -258,9 +275,11 @@ Logs(gcfg, _, target, errOnly):
 | `logs <未註冊>`                   | exit ≠ 0                                                   |
 | `runtime status <未註冊> --json`  | stderr 輸出 `{"error":{"code":"runtime_not_found",…}}`、exit ≠ 0;stdout 無 payload |
 | `runtime status --json` 指向 state.yaml 缺失的 workspace | stderr `error.code = state_not_found`、exit ≠ 0 |
+| `runtime remove <未註冊>`         | exit ≠ 0;config.yaml 不被改動                              |
 
 ### 7.4 通過條件
 
 - `start` 後 config.yaml 以 workspace 為 key upsert（同路徑重跑不長出重複條目、無 `active_runtime` 欄位）。
 - `runtime status` 於 daemon 存活時回報 state.yaml 的 `runtime_state`,daemon 不存活時回報 `down`。
 - 三個查詢子指令全程**不修改** config.yaml / state.yaml / task.yaml（可用 mtime 觀察）。
+- `runtime remove` 僅從 config.yaml 移除目標條目,不觸碰 state.yaml / task.yaml / logs;未註冊目標回非零 exit 且 config.yaml 不變。

@@ -13,14 +13,14 @@
 ## 2. 目錄結構與導覽 (Directory Structure)
 
 ### 核心入口
-- `cmd/gogents/`: 應用程式進入點 (main.go)，處理 CLI 指令定義 (`start`、`runtime list`、`runtime status`、`logs`)。
+- `cmd/gogents/`: 應用程式進入點 (main.go)，處理 CLI 指令定義 (`start`、`runtime list`、`runtime status`、`runtime remove`、`logs`)。
 - `bin/`: 編譯後的執行檔輸出目錄。
 - `logs/`: 測試報告、覆蓋率與執行日誌輸出目錄。
 
 ### 內部模組 (`internal/`)
 - `internal/foundation/`: 底層基礎建設。
-    - `config.go`: 全域配置載入；`~/.gogents/config.yaml` runtime 註冊表 (以 workspace 路徑為 key 的 upsert)。
-    - `workspace.go`: 工作區路徑管理與目錄結構定義。
+    - `config.go`: 全域配置載入；`<全域家目錄根>/config.yaml` runtime 註冊表 (以 workspace 路徑為 key 的 upsert；`runtime remove` 反註冊移除)。
+    - `workspace.go`: 工作區路徑管理與目錄結構定義；全域家目錄根解析 (`GOGENTS_HOME` 覆寫，預設 `~/.gogents`)，供 config 與 logs 共用。
     - `task_store.go`: 任務狀態持久化管理。
 - `internal/daemon/`: 守護進程與同步邏輯。
     - `daemon.go`: 主程序生命週期控制。

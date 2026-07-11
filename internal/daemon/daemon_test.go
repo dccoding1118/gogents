@@ -124,6 +124,10 @@ func (m *mockGlobalConfig) Resolve(string) (foundation.RuntimeRegistration, erro
 	return foundation.RuntimeRegistration{}, nil
 }
 
+func (m *mockGlobalConfig) Remove(string) error {
+	return nil
+}
+
 // TestDaemon_RegistrationAndRuntimeState covers D02-15 (startup registers the
 // runtime) and D02-16 (runtime_state is initialised to idle).
 func TestDaemon_RegistrationAndRuntimeState(t *testing.T) {
