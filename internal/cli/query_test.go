@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dccoding/gogents/internal/daemon"
-	"github.com/dccoding/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/daemon"
+	"github.com/dccoding1118/gogents/internal/foundation"
 )
 
 func newRegistry(t *testing.T) (foundation.GlobalConfigStore, string) {

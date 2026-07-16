@@ -12,13 +12,13 @@ import (
 	"io"
 	"os"
 
-	"github.com/dccoding/gogents/internal/agent"
-	"github.com/dccoding/gogents/internal/daemon"
-	"github.com/dccoding/gogents/internal/execution"
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/gitops"
-	"github.com/dccoding/gogents/internal/logger"
-	"github.com/dccoding/gogents/internal/source"
+	"github.com/dccoding1118/gogents/internal/agent"
+	"github.com/dccoding1118/gogents/internal/daemon"
+	"github.com/dccoding1118/gogents/internal/execution"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/gitops"
+	"github.com/dccoding1118/gogents/internal/logger"
+	"github.com/dccoding1118/gogents/internal/source"
 )
 
 // Dispatch routes args (os.Args[1:]) to a subcommand handler and returns the

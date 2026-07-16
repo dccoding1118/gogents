@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dccoding/gogents/internal/source"
+	"github.com/dccoding1118/gogents/internal/source"
 )
 
 func TestRenderInputMd(t *testing.T) {

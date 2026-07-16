@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dccoding/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/foundation"
 )
 
 func TestStateStore(t *testing.T) {

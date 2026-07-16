@@ -1,4 +1,4 @@
-module github.com/dccoding/gogents
+module github.com/dccoding1118/gogents
 
 go 1.23.0
 

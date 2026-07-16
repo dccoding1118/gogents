@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dccoding/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/foundation"
 )
 
 // TestRuntimeRemove drives the full `gogents runtime remove` dispatch path. It

@@ -12,11 +12,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dccoding/gogents/internal/execution"
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/gitops"
-	"github.com/dccoding/gogents/internal/logger"
-	"github.com/dccoding/gogents/internal/source"
+	"github.com/dccoding1118/gogents/internal/execution"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/gitops"
+	"github.com/dccoding1118/gogents/internal/logger"
+	"github.com/dccoding1118/gogents/internal/source"
 )
 
 // Daemon is the top-level entry point for the daemon process (D02 §4.1).

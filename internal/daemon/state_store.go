@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/dccoding/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/foundation"
 )
 
 // StateStore provides atomic read/write for state.yaml (D02 §4.5).

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/logger"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/logger"
 )
 
 // FeedbackReporter interacts with GitHub issues to add comments and labels.

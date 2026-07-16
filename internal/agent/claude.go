@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/logger"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/logger"
 )
 
 const claudeAgentType = "claude"
