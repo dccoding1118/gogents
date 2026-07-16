@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/logger"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/logger"
 )
 
 // ErrAgentUnsupportedType is returned when the agent type is unknown.

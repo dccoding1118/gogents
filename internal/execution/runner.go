@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dccoding/gogents/internal/agent"
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/gitops"
-	"github.com/dccoding/gogents/internal/logger"
-	"github.com/dccoding/gogents/internal/source"
+	"github.com/dccoding1118/gogents/internal/agent"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/gitops"
+	"github.com/dccoding1118/gogents/internal/logger"
+	"github.com/dccoding1118/gogents/internal/source"
 )
 
 // Deps wires the dependencies for the real TaskExecutor (D03 §4.2).

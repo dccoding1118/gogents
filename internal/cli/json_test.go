@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dccoding/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/foundation"
 )
 
 // D08-11: `runtime list --json` — array of runtimes; empty registry marshals to

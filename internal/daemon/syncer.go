@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/logger"
-	"github.com/dccoding/gogents/internal/source"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/logger"
+	"github.com/dccoding1118/gogents/internal/source"
 )
 
 // Syncer performs one round of synchronization per Tick call (D02 §4.2).

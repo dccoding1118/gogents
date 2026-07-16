@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dccoding/gogents/internal/daemon"
-	"github.com/dccoding/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/daemon"
+	"github.com/dccoding1118/gogents/internal/foundation"
 )
 
 // ErrStateNotFound is returned by Status when the target is registered but has

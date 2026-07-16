@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/source"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/source"
 )
 
 // basePromptTemplate is the fixed English block that wraps the task content

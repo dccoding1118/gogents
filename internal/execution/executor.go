@@ -3,8 +3,8 @@ package execution
 import (
 	"context"
 
-	"github.com/dccoding/gogents/internal/foundation"
-	"github.com/dccoding/gogents/internal/logger"
+	"github.com/dccoding1118/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/logger"
 )
 
 // TaskExecutor runs a single task. Stage 2 uses the no-op implementation;

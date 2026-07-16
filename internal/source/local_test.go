@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dccoding/gogents/internal/foundation"
+	"github.com/dccoding1118/gogents/internal/foundation"
 )
 
 func localCfg(dir, label string) foundation.Config {
