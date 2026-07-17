@@ -50,7 +50,7 @@ type Config struct {
 	Source struct {
 		Type     string `yaml:"type"`
 		Instance string `yaml:"instance,omitempty"` // github_issue: owner/repo
-		Path     string `yaml:"path,omitempty"`     // local: ticket inbox dir (default ~/.am/tickets)
+		Path     string `yaml:"path,omitempty"`     // local: ticket inbox dir (default <GlobalHome>/tickets)
 		Filter   struct {
 			Label string `yaml:"label"`
 		} `yaml:"filter"`
@@ -166,8 +166,8 @@ func validateConfigSchema(cfg *Config) error {
 			return fmt.Errorf("%w: source.instance is required for source.type=github_issue", ErrConfigSchema)
 		}
 	case "local":
-		// source.path is optional (defaults to ~/.am/tickets); filter.label is
-		// already required above.
+		// source.path is optional (defaults to <GlobalHome>/tickets); filter.label
+		// is already required above.
 	default:
 		return fmt.Errorf("%w: unsupported source.type: %q", ErrConfigSchema, cfg.Source.Type)
 	}

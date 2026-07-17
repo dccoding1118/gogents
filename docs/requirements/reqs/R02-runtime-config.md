@@ -58,22 +58,22 @@ source:
 
 ### `local`
 
-對接 agent-manager (am):讀本地統一 ticket inbox,認領自身 label 且 `status == queued` 的 ticket。
+讀本地 ticket inbox,認領自身 label 且 `status == queued` 的 ticket。
 
 ```yaml
 source:
   type: "local"
-  path: "~/.am/tickets"           # am 的統一 ticket inbox
+  path: "~/.gogents/tickets"      # ticket inbox
   filter:
     label: "<this-worker-label>"  # 僅認領此 label 且 status=queued 的 ticket
   sync_interval: "30s"
 ```
 
-- `path`: ticket inbox 目錄;省略時預設 `~/.am/tickets`
+- `path`: ticket inbox 目錄;省略時預設 `<全域家目錄根>/tickets`(見 R01)
 - `filter.label`: 本 worker 專長 label;多 daemon 共讀同一 inbox、各取各 label、無爭用
 - `instance` 不使用
 
-ticket 檔為 YAML,欄位由 am 定義;gogents 僅讀執行所需欄位並回寫終態。任務單位與驗證、回報細節見 R11。
+ticket 檔為 YAML,契約見 R11;gogents 僅讀執行所需欄位並回寫終態。任務單位與驗證、回報細節見 R11。
 
 ## agent 區塊設計原則
 
@@ -137,7 +137,7 @@ Daemon 啟動時依序執行以下檢查,任一失敗即拒絕啟動並寫入 st
 
 - 必填欄位齊全(runtime_name、project.repo.url、source.*、agent.type、agent.model)
 - `source.type` 為支援的值(`github_issue` 或 `local`)
-- 依 `source.type` 檢查其專屬必填欄位:`github_issue` 需 `source.instance`;`local` 需 `source.filter.label`(`source.path` 省略時預設 `~/.am/tickets`)
+- 依 `source.type` 檢查其專屬必填欄位:`github_issue` 需 `source.instance`;`local` 需 `source.filter.label`(`source.path` 省略時預設 `<全域家目錄根>/tickets`)
 - `agent.type` 為支援的值(`claude`)
 - `sync_interval` 可被 `time.ParseDuration` 解析
 - `task_policy.max_failures` 為正整數(未設定則用預設值 3)
@@ -155,9 +155,9 @@ Daemon 啟動時依序執行以下檢查,任一失敗即拒絕啟動並寫入 st
 
 **`source.type: local` 的檢查項目:**
 
-1. **inbox 可讀**: 確認 `source.path`(預設 `~/.am/tickets`)存在且可讀取;不存在或無讀權限即拒啟
+1. **inbox 可讀**: 確認 `source.path`(預設 `<全域家目錄根>/tickets`)存在且可讀取;不存在或無讀權限即拒啟
 
-檢查失敗時,error.jsonl 記錄具體失敗原因(例如「`gh` 未安裝」「`gh auth status` 顯示未登入」「repo `owner/repo` 不存在或無權限」「ticket inbox `~/.am/tickets` 不存在或無法讀取」),讓使用者可直接修正。
+檢查失敗時,error.jsonl 記錄具體失敗原因(例如「`gh` 未安裝」「`gh auth status` 顯示未登入」「repo `owner/repo` 不存在或無權限」「ticket inbox `~/.gogents/tickets` 不存在或無法讀取」),讓使用者可直接修正。
 
 ### 階段 3:agent 工具鏈檢查
 

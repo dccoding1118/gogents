@@ -34,11 +34,15 @@
 ```
 ~/.gogents/
 ├── config.yaml                   # 全域設定（見 R02）
+├── tickets/                      # local 任務源的預設 ticket inbox（見 R11）
+│   └── <ticket-id>.yaml          # 由 producer 建立；gogents 回寫終態
 └── logs/
     └── <workspace-hash>/
         ├── daemon.jsonl          # daemon 執行日誌（見 R09）
         └── error.jsonl           # daemon 錯誤日誌（見 R09）
 ```
+
+`tickets/` 僅在 `source.type: local` 且 `source.path` 省略時作為預設 inbox；顯式設定 `source.path` 時 inbox 落在該路徑，不在全域家目錄下。gogents 不建立此目錄（見 R11）。
 
 `<workspace-hash>` 為 workspace 絕對路徑的短雜湊（建議 SHA1 前 8 碼），用來區分不同 workspace 的 daemon 日誌，避免互相覆蓋。
 

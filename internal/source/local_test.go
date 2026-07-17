@@ -141,6 +141,35 @@ func TestLocalProbe(t *testing.T) {
 	})
 }
 
+// D07-05a — source.path resolution: default follows GOGENTS_HOME, explicit
+// values are taken as-is apart from a leading ~/.
+func TestExpandTicketDir(t *testing.T) {
+	t.Run("empty path defaults under global home", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("GOGENTS_HOME", home)
+		if got, want := expandTicketDir(""), filepath.Join(home, "tickets"); got != want {
+			t.Fatalf("expandTicketDir(\"\") = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("explicit path wins over global home", func(t *testing.T) {
+		t.Setenv("GOGENTS_HOME", t.TempDir())
+		if got := expandTicketDir("/srv/tickets"); got != "/srv/tickets" {
+			t.Fatalf("expandTicketDir = %q, want /srv/tickets", got)
+		}
+	})
+
+	t.Run("leading ~/ expands to user home", func(t *testing.T) {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("no user home")
+		}
+		if got, want := expandTicketDir("~/inbox"), filepath.Join(home, "inbox"); got != want {
+			t.Fatalf("expandTicketDir = %q, want %q", got, want)
+		}
+	})
+}
+
 func TestLocalContentFetcher(t *testing.T) {
 	dir := t.TempDir()
 	writeTicket(t, dir, "t-1.yaml", "id: t-1\nworker: backend\ngoal: My Goal\ncontext: The body\n")

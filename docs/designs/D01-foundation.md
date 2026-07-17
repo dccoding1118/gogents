@@ -55,7 +55,7 @@ graph LR
 | `project.repo.default_branch` | string                  | 預設 base branch                 |
 | `source.type`                 | enum `github_issue`, `local` | 任務來源型別                |
 | `source.instance`             | string                  | 任務來源實例（`github_issue`：owner/repo） |
-| `source.path`                 | string                  | ticket inbox 路徑（`local`；預設 `~/.am/tickets`） |
+| `source.path`                 | string                  | ticket inbox 路徑（`local`；省略時 `GlobalHome()/tickets`） |
 | `source.filter.label`         | string                  | 觸發 / 認領 label（必填）        |
 | `source.sync_interval`        | duration                | Sync 間隔（例：`60s`）           |
 | `agent.type`                  | enum `claude`           | Agent CLI 型別                   |
