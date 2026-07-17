@@ -1,0 +1,62 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      # No cgo in the dependency tree, so one linux runner cross-compiles every
+      # target. Windows is absent by design: internal/cli's pid liveness probe
+      # uses syscall.Kill, which does not exist there (CH-010 §3.2).
+      - name: Build archives
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            os="${target%/*}"
+            arch="${target#*/}"
+            name="gogents_${version}_${os}_${arch}"
+            stage="dist/${name}"
+
+            mkdir -p "${stage}"
+            GOOS="${os}" GOARCH="${arch}" \
+              go build -trimpath -ldflags="-s -w" -o "${stage}/gogents" ./cmd/gogents
+
+            # templates/ ships for reading and copying; embed.go is a build-time
+            # artifact with no meaning to a release user (CH-010 §3.3).
+            cp -r templates "${stage}/templates"
+            find "${stage}/templates" -name '*.go' -delete
+            cp LICENSE README.md "${stage}/"
+
+            tar -czf "${stage}.tar.gz" -C dist "${name}"
+            rm -rf "${stage}"
+          done
+          cd dist && sha256sum ./*.tar.gz > checksums.txt
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/*.tar.gz dist/checksums.txt \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

@@ -20,6 +20,7 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
 - `templates/base/`: 內建 workspace template，以 `go:embed` 打包進 binary；repo 內保留原始檔供複製修改。`templates/` 是收納目錄、`base/` 才是樹根（embed 亦 `fs.Sub` 到 `base/`），外部樹同構——`$GOGENTS_TEMPLATES` 對應收納目錄那層。
 - `bin/`: 編譯後的執行檔輸出目錄。
 - `logs/`: 測試報告、覆蓋率與執行日誌輸出目錄。
+- `.github/workflows/release.yml`: 發佈流程。推 `v*` tag 觸發，單一 linux runner 交叉編譯 linux/darwin × amd64/arm64，打包 binary + `templates/`（排除 `*.go`）+ `LICENSE` + `README.md`，經 `gh` 發佈至 GitHub Releases。規格見 CH-010。
 
 ### 內部模組 (`internal/`)
 - `internal/foundation/`: 底層基礎建設。
@@ -71,6 +72,7 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
 
 - **我要新增一個 CLI 指令**: 修改 `internal/cli/cli.go` 的 `Dispatch`（`cmd/gogents/main.go` 只是薄進入點）。
 - **我要調整 workspace 佈建或 template 內容**: template 檔案改 `templates/base/`（新增檔案無需改程式）；materialize 規則與 `--template` / `GOGENTS_TEMPLATES` 的來源解析見 `internal/provision/`；旗標與確認流程見 `internal/cli/`。
+- **我要調整發佈產物或平台矩陣**: 修改 `.github/workflows/release.yml`（Windows 不在矩陣內：`internal/cli` 的 pid 探活用 `syscall.Kill`，於 Windows 編譯即失敗）。
 - **我要調整配置參數**: 修改 `internal/foundation/config.go`。
 - **我要修改 Agent 的 Prompt 或行為**: 修改 `internal/agent/` 下對應的檔案。
 - **我要改變任務狀態的處理方式**: 修改 `internal/foundation/task_store.go`。
