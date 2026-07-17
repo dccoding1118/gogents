@@ -16,7 +16,7 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
 
 ### 核心入口
 - `cmd/gogents/`: 應用程式進入點 (main.go)，薄進入點，呼叫 `internal/cli` 的 `Dispatch`。
-- `internal/cli/`: 命令層 (`start`、`runtime create`、`runtime list`、`runtime status`、`runtime remove`、`logs`)；`start` 的組裝亦在此。
+- `internal/cli/`: 命令層 (`start`、`runtime create`、`runtime list`、`runtime status`、`runtime remove`、`logs`、`version`)；`start` 的組裝亦在此。
 - `templates/base/`: 內建 workspace template，以 `go:embed` 打包進 binary；repo 內保留原始檔供複製修改。`templates/` 是收納目錄、`base/` 才是樹根（embed 亦 `fs.Sub` 到 `base/`），外部樹同構——`$GOGENTS_TEMPLATES` 對應收納目錄那層。
 - `bin/`: 編譯後的執行檔輸出目錄。
 - `logs/`: 測試報告、覆蓋率與執行日誌輸出目錄。
@@ -46,6 +46,7 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
     - **不刪除任何檔案**（含失敗路徑）；失敗時回傳已落地檔案清單供呼叫端列出。
 - `internal/gitops/`: Git 操作封裝。
 - `internal/logger/`: 結構化日誌記錄工具。
+- `internal/version/`: binary 身分解析 (`version` 指令)。ldflags `-X` 注入值優先，未注入時退回 `debug.ReadBuildInfo()` 的 `Main.Version` 與 `vcs.*` 戳記，全無則為 `dev` / `unknown`。規格見 CH-011。
 
 ### 文檔資源 (`docs/`)
 - `docs/designs/`: 詳細架構設計文件 (D01-D09)。開發前務必閱讀對應模組的設計。
@@ -72,7 +73,8 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
 
 - **我要新增一個 CLI 指令**: 修改 `internal/cli/cli.go` 的 `Dispatch`（`cmd/gogents/main.go` 只是薄進入點）。
 - **我要調整 workspace 佈建或 template 內容**: template 檔案改 `templates/base/`（新增檔案無需改程式）；materialize 規則與 `--template` / `GOGENTS_TEMPLATES` 的來源解析見 `internal/provision/`；旗標與確認流程見 `internal/cli/`。
-- **我要調整發佈產物或平台矩陣**: 修改 `.github/workflows/release.yml`（Windows 不在矩陣內：`internal/cli` 的 pid 探活用 `syscall.Kill`，於 Windows 編譯即失敗）。
+- **我要調整發佈產物或平台矩陣**: 修改 `.github/workflows/release.yml`（Windows 不在矩陣內：`internal/cli` 的 pid 探活用 `syscall.Kill`，於 Windows 編譯即失敗）。版本注入的 `-X` 符號路徑與 `internal/version` 的變數名綁定，改名須同步兩處。
+- **我要調整版本輸出或來源**: 修改 `internal/version/`；建置期注入見 `.github/workflows/release.yml` 的 `-ldflags`。
 - **我要調整配置參數**: 修改 `internal/foundation/config.go`。
 - **我要修改 Agent 的 Prompt 或行為**: 修改 `internal/agent/` 下對應的檔案。
 - **我要改變任務狀態的處理方式**: 修改 `internal/foundation/task_store.go`。

@@ -4,7 +4,7 @@
 
 公開化計畫（2026-07-16 定案）尚未落 `docs/` 的決策；各項於對應變更單落檔後從此處刪除。
 
-**定位**（落點：CH-011）
+**定位**（落點：CH-012）
 
 - gogents 是**個人／本機 agent 的專業運作環境工具**，可獨立運作、不依賴 am。am 從「控制面／Tower」降格為 local source 的其中一種 ticket producer。
 
@@ -15,7 +15,6 @@
 **指令**
 
 - **不新增 `init` 指令**：`config.yaml` 已是 lazy 自動建立（`Load` 缺檔回空 registry + nil，`Upsert` 的 `atomicWrite` 會 `MkdirAll`），`runtime list` 不會 fail。專建 config.yaml 的 init 屬純儀式。環境前置檢查（git / gh / claude 可用性）若要做，另名 `doctor`。
-- release binary 無版本資訊（無 `version` 指令、未注入 ldflags），使用者拿到產物無從辨識版本。待 CH-011 或另案處理。
 
 **am 收斂**
 
@@ -30,5 +29,5 @@
 
 各項逐一開隔離 session 執行。
 
-- [ ] **CH-011 公開化定位重寫**：README／AGENTS／requirement.md／R01, R02, R04, R07, R11, R12／D01, D07, D08 拔除「gogents 是 am 的執行面」定位，改為 producer 中立敘述（am 續留為 producer 與 `--json` 消費者的實例）。程式碼註解同步：`internal/foundation/config.go`、`internal/foundation/home.go`、`internal/cli/query.go`、`internal/source/local_test.go`。
+- [ ] **CH-012 公開化定位重寫**：README／AGENTS／requirement.md／R01, R02, R04, R07, R11, R12／D01, D07, D08 拔除「gogents 是 am 的執行面」定位，改為 producer 中立敘述（am 續留為 producer 與 `--json` 消費者的實例）。程式碼註解同步：`internal/foundation/config.go`、`internal/foundation/home.go`、`internal/cli/query.go`、`internal/source/local_test.go`。不動需求／設計規格、不影響程式邏輯，故不開變更單。
 - [ ] **開源專案結構與文件標準檢視**：對照業界慣例盤點公開 repo 的必要內容（CONTRIBUTING／CODE_OF_CONDUCT／issue・PR template／PR CI workflow／SECURITY.md 等）與 `docs/` 結構，決定取捨後再考慮抽成 skill。
