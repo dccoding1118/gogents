@@ -8,7 +8,7 @@
 
 - 單一 daemon 對應單一 workspace、單一 git repo、單一任務來源
 - 任務來源型別由 `source.type` 決定:`github_issue`(遠端 GitHub Issue)或 `local`(本地 `~/.am/tickets/` ticket inbox);兩者共用同一套 task store、狀態機與執行流程
-- Workspace 內的 agent runtime 元素(`.claude/CLAUDE.md`、`.claude/skills/`、`.mcp.json`、AGENTS.md 等)由使用者手動預先配置,daemon 不管理;agent 以 workspace 根為工作目錄,使 workspace 級專長配置生效
+- Workspace 內的 agent runtime 元素(`.claude/CLAUDE.md`、`.claude/skills/`、`.mcp.json` 等)由 `gogents runtime create` 依內建 template 佈建(見 R13),使用者可續行修改;daemon 執行期不管理這些檔案。repo 內的 AGENTS.md 由使用者自行維護。agent 以 workspace 根為工作目錄,使 workspace 級專長配置生效
 - 一次循序處理一個任務,避免 git 狀態衝突
 - 目前版本不做容器化、不做 admin 通道、不做多 workspace 管理
 - 目前版本不做 archive 機制,任務目錄完成後保留(retention policy 留待後續版本在 runtime.yaml 增加相關設定)
@@ -29,6 +29,7 @@
 | R10 | 錯誤處理             | [reqs/R10-error-handling.md](reqs/R10-error-handling.md)     | 全部     | 4    |
 | R11 | 本地任務源 (local)   | [reqs/R11-local-source.md](reqs/R11-local-source.md)         | R02, R03, R06, R07 | 5 |
 | R12 | Runtime 註冊與觀測   | [reqs/R12-runtime-observability.md](reqs/R12-runtime-observability.md) | R02, R04 | 5 |
+| R13 | Workspace 佈建       | [reqs/R13-workspace-provisioning.md](reqs/R13-workspace-provisioning.md) | R01, R02 | 6 |
 
 ## 開發階段建議
 
@@ -46,6 +47,9 @@ R10。 處理各種失敗情境: agent CLI 崩潰、git 失敗、GitHub API 失�
 
 **Stage 5 — agent-manager (am) 整合**
 R11 → R12。新增 `local` 任務源(讀 `~/.am/tickets/` ticket inbox、依 label 與 `status == queued` 過濾、ticket `verify` 驗證、終態 result 回寫 ticket 檔),以及 runtime 註冊(`start` 寫入 `~/.gogents/config.yaml`)與觀測 CLI(`gogents runtime list/status`、`gogents logs`)。完成後 am 可佈署 worker、派工、查詢執行狀態與匯出稽核。
+
+**Stage 6 — Workspace 佈建**
+R13。新增 `gogents runtime create`:由內建 template 佈建出可直接 `start` 的 workspace(`.gogents/runtime.yaml` 與 agent runtime 元素)。完成後使用者無需手寫 runtime.yaml 即可起用一個 runtime。
 
 ## 依賴關係圖
 
@@ -78,6 +82,7 @@ graph LR
 
     R11["R11-local-source"]
     R12["R12-runtime-observability"]
+    R13["R13-workspace-provisioning"]
 
     R02 --> R11
     R03 --> R11
@@ -85,6 +90,8 @@ graph LR
     R07 --> R11
     R02 --> R12
     R04 --> R12
+    R01 --> R13
+    R02 --> R13
 
     R10 -.橫切.-> R04
     R10 -.橫切.-> R05
@@ -93,7 +100,7 @@ graph LR
     R10 -.橫切.-> R08
 ```
 
-實線箭頭表示直接依賴(被依賴者必須先定義),虛線箭頭表示橫切關注點(R10 錯誤處理需要參照其他需求的失敗情境)。R11(local 任務源)與 R05(GitHub Issue 同步)為兩個並列的 source concrete;R12 涵蓋 runtime 註冊與觀測 CLI。
+實線箭頭表示直接依賴(被依賴者必須先定義),虛線箭頭表示橫切關注點(R10 錯誤處理需要參照其他需求的失敗情境)。R11(local 任務源)與 R05(GitHub Issue 同步)為兩個並列的 source concrete;R12 涵蓋 runtime 註冊與觀測 CLI;R13 涵蓋 workspace 佈建(`runtime create`),產出 R01 的目錄結構與 R02 的 runtime.yaml。
 
 ## 關鍵檔案索引
 
@@ -103,7 +110,9 @@ graph LR
 
 | 檔案路徑                                | 用途                    | 寫入者    | 定義於   |
 | --------------------------------------- | ----------------------- | --------- | -------- |
-| `.gogents/runtime.yaml`                 | Workspace 執行設定      | 使用者    | R02      |
+| `.gogents/runtime.yaml`                 | Workspace 執行設定      | `runtime create`(或使用者手寫) | R02, R13 |
+| `.claude/CLAUDE.md`、`.claude/skills/`  | Agent runtime 元素      | `runtime create`(使用者可續行修改) | R13 |
+| `.mcp.json`                             | MCP 工具設定            | `runtime create`(使用者可續行修改) | R13 |
 | `.gogents/state.yaml`                   | Daemon 執行狀態(含 `runtime_state`) | Daemon | R04      |
 | `.gogents/tasks/<task-id>/task.yaml`    | 任務狀態與中繼資料      | Daemon    | R03      |
 | `.gogents/tasks/<task-id>/input.md`     | 餵給 agent 的提示詞     | Daemon    | R06      |

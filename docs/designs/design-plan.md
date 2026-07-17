@@ -2,7 +2,7 @@
 
 本檔案是 `docs/designs/` 的索引與撰寫規範。新 session 讀完即可接手撰寫未完成的設計文件，也作為後續閱讀 / 修改設計時的入口。
 
-- **上游**：`docs/requirements/requirement.md`、`docs/requirements/reqs/R01–R10`
+- **上游**：`docs/requirements/requirement.md`、`docs/requirements/reqs/R01–R13`
 - **設計文件職責**：把需求轉為「coding agent 可直接依此開發」的規格；不寫實作程式碼（除關鍵介面的 method signature）
 
 ---
@@ -20,7 +20,8 @@
 | `D05-github-client.md` | `github-client` | 共用基礎 | 支援 R05 / R08 | `gh` CLI 封裝 + `TaskSource`（GitHub Issue）實作 + `SourceProbe` + `FeedbackReporter` |
 | `D06-agent-runner.md` | `agent-runner` | 適配層 | 支援 R06 | Agent CLI 抽象；Claude 實作 |
 | `D07-local-source.md` | `local-source` | concrete strategy | 支援 R11 | `local` 任務源：讀 `~/.am/tickets/` 的 `TaskSource` / `SourceProbe` / `ContentFetcher` / `FeedbackReporter`（與 D05 並列） |
-| `D08-runtime-cli.md` | `runtime-cli` | 觀測介面 | R12 | `gogents runtime list/status`、`gogents logs`；runtime 註冊寫入 `~/.gogents/config.yaml` |
+| `D08-runtime-cli.md` | `runtime-cli` | 命令介面 | R12 + R13（命令面） | `gogents runtime create/list/status/remove`、`gogents logs`；runtime 註冊寫入 `~/.gogents/config.yaml` |
+| `D09-provision.md` | `provision` | 佈建 library | R13 | 由內建 template 樹 materialize 出 workspace；`go:embed` 打包 |
 
 ### 相依圖（實線 = 直接依賴；虛線 = 介面實作）
 
@@ -51,9 +52,9 @@ graph LR
 
 ### 撰寫順序
 
-依相依方向，下游引用上游已定義介面：**D01 → D04 → D02 → D05 → D06 → D03 → D07 → D08**。
+依相依方向，下游引用上游已定義介面：**D01 → D04 → D02 → D05 → D06 → D03 → D07 → D09 → D08**。
 
-D07（local-source）與 D05（github-client）並列，同為 `source.type` 的 concrete strategy——實作 D02 §4.3 的 `TaskSource`、D01 的 `SourceProbe`、D03 §4.3 的 `TaskContentFetcher`、D05 §4.3 的 `FeedbackReporter` 四個介面；dispatcher（依 `source.type` 選 concrete）仍在 D02 §4.4，新增 `local` case，OCP 不改上游。D08（runtime-cli）依賴 D01（`WorkspacePaths` / config.yaml）、D02（`state.yaml`）、D04（logs 路徑），提供 `start` 註冊寫入與觀測子指令。
+D07（local-source）與 D05（github-client）並列，同為 `source.type` 的 concrete strategy——實作 D02 §4.3 的 `TaskSource`、D01 的 `SourceProbe`、D03 §4.3 的 `TaskContentFetcher`、D05 §4.3 的 `FeedbackReporter` 四個介面；dispatcher（依 `source.type` 選 concrete）仍在 D02 §4.4，新增 `local` case，OCP 不改上游。D08（runtime-cli）依賴 D01（`WorkspacePaths` / config.yaml）、D02（`state.yaml`）、D04（logs 路徑）、D09（materialize），提供 `start` 註冊寫入、觀測子指令與 `runtime create`。D09（provision）為純檔案系統 library，只依賴 D01 的 `AtomicWrite`；互動確認與終端輸出留在 D08，D09 僅提供目標狀態判定與佈建計畫。
 
 ### 階段對應實作範圍
 

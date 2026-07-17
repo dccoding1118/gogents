@@ -8,11 +8,11 @@
 
 ## Workspace 結構
 單一 workspace 是一個目錄，內含一個 git repo 與 task 的
-管理檔案。預期由使用者手動建立並配置 agent runtime 元素。
+管理檔案。由 `gogents runtime create` 佈建（見 R13），亦可由使用者手動建立。
 ```
 <workspace-root>/
 ├── .gogents/
-│   ├── runtime.yaml              # 此 workspace 的設定（見 R02）
+│   ├── runtime.yaml              # 此 workspace 的設定（見 R02）；create 佈建
 │   ├── state.yaml                # daemon 執行狀態（見 R04）
 │   └── tasks/
 │       └── <task-id>/
@@ -23,9 +23,10 @@
 ├── <reponame>/                   # daemon 啟動時 git clone 進來
 │   ├── AGENTS.md                 # 使用者自行維護
 │   └── ... (專案程式碼)
-├── .claude/                      # 使用者手動配置的 agent runtime 元素
-│   └── ...
-└── .mcp.json                     # 使用者手動配置的 MCP 工具
+├── .claude/                      # agent runtime 元素；create 佈建，使用者可續行修改
+│   ├── CLAUDE.md
+│   └── skills/
+└── .mcp.json                     # MCP 工具設定；create 佈建，使用者可續行修改
 ```
 
 ## 全域目錄結構
@@ -66,10 +67,13 @@ github-<issue-number>
 - owner/repo/branch/PR URL 等資訊存放在該任務的 task.yaml
 
 ## 路徑變動責任界線
-- **使用者責任**：
+- **`runtime create` 責任**（見 R13）：
   - 建立 workspace 根目錄
-  - 放置 `.gogents/runtime.yaml`
-  - 手動配置 agent runtime 元素（`.claude/`、`.mcp.json` 等）
+  - 產生 `.gogents/runtime.yaml`
+  - 佈建 agent runtime 元素（`.claude/CLAUDE.md`、`.claude/skills/`、`.mcp.json`）
+- **使用者責任**：
+  - 決定 workspace 位置
+  - 佈建後續行調整 agent runtime 元素；不經 `runtime create` 時則自行建立上述全部
 - **Daemon 責任**：
   - 建立 `.gogents/tasks/`、`.gogents/state.yaml`
   - `git clone` repo 到 workspace 根目錄（見 R04）
@@ -82,6 +86,7 @@ github-<issue-number>
 - 若 `<reponame>/` 已存在但非 git repo：daemon 拒絕啟動並回報錯誤
 
 ## 相關需求
+- R13 - Workspace 佈建（`runtime create` 如何產生上述結構）
 - R02 - Runtime 設定檔（定義 runtime.yaml 與 config.yaml 內容）
 - R03 - 任務狀態模型（定義 task.yaml 內容）
 - R04 - Daemon 生命週期（定義 state.yaml 內容與 clone 時機）

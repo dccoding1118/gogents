@@ -223,6 +223,10 @@ type RuntimeRegistration struct {
 }
 
 var ErrRuntimeNotRegistered = errors.New("runtime not found in ~/.gogents/config.yaml")
+
+// 原子寫入（write-tmp → fsync → rename）；本模組的 GlobalConfigStore 與 D09 provision
+// 共用同一份實作，確保落檔語意一致、無半寫檔案與暫存檔殘留。
+func AtomicWrite(path string, data []byte, perm fs.FileMode) error
 ```
 
 呼叫者使用流程：由 D02 啟動時建立 `ConfigLoader`、組裝 `ToolchainProbe`（git = 本模組內建；source = D05；agent = D06）、建立 `WorkspacePaths` 與 `TaskStore`，後續傳入各模組使用。
