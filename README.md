@@ -30,9 +30,11 @@ Two task sources feed one shared pipeline: `github_issue` (GitHub Issues via `gh
 | D04    | `internal/logger`     | Structured JSONL logger                            |
 | D05    | `internal/source`     | Task sources (`github_issue`, `local`), feedback reporters, content fetchers, dispatcher |
 | D06    | `internal/agent`      | Claude probe & executor adapter                    |
+| D09    | `internal/provision`  | Workspace provisioning from the embedded template (`runtime create`) |
 
 ## Features
 
+- **One-Command Workspace Provisioning** — `gogents runtime create <name>` materializes a ready-to-start workspace (runtime.yaml + agent runtime elements) from a template embedded in the binary, so a downloaded binary needs no external files. It never deletes anything under your directory, and asks before writing into a non-empty one.
 - **Pluggable Task Sources** — `github_issue` polls GitHub Issues (via `gh` CLI) by label; `local` reads an am ticket inbox (`~/.am/tickets/`), claiming tickets that match the worker label **and** carry `status: queued`. Both share one task store, state machine, and execution pipeline.
 - **Pluggable Agent Architecture** — Agents sit behind a simple probe/executor interface. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the officially supported agent; new agents can be added by implementing the interface.
 - **Automated Execution Pipeline** — For each task: fetches task content → prepares `input.md` → creates a Git branch → invokes the agent (with the **workspace root** as its working directory, so workspace-level `.claude/` and `.mcp.json` apply) → judges the result → reports back to the source.
@@ -66,9 +68,44 @@ mise run build
 # Output: bin/gogents
 ```
 
-### 3. Configure
+### 3. Create a runtime
 
-Create a runtime config at `<workspace>/.gogents/runtime.yaml`.
+`runtime create` provisions a ready-to-start workspace from the built-in template — `.gogents/runtime.yaml` plus the agent runtime elements (`.claude/CLAUDE.md`, `.claude/skills/`, `.mcp.json`):
+
+```bash
+# Local ticket source
+bin/gogents runtime create my-worker \
+    --repo https://github.com/<owner>/<repo> \
+    --agent claude --model claude-sonnet-5 \
+    --source local
+
+# GitHub Issue source
+bin/gogents runtime create my-workspace \
+    --repo https://github.com/<owner>/<repo> \
+    --agent claude --model claude-sonnet-5 \
+    --source github_issue --instance <owner>/<repo> \
+    --label gogents:queued
+```
+
+| Flag | Required | Default | Notes |
+| --- | --- | --- | --- |
+| `<name>` | yes | — | Runtime name (positional) |
+| `--workspace` | no | `./<name>` | Workspace root |
+| `--repo` | yes | — | Repo URL |
+| `--branch` | no | `main` | Default branch |
+| `--agent` | yes | — | `claude` |
+| `--model` | yes | — | Agent model |
+| `--source` | yes | — | `local` or `github_issue` |
+| `--label` | no | `<name>` | Task filter label |
+| `--instance` | for `github_issue` | — | `<owner>/<repo>` |
+| `--tickets-dir` | no | — | `local` ticket inbox; omit to use the default |
+| `--force` | no | false | Skip the confirmation prompt on a non-empty workspace |
+
+`create` only builds the workspace — it does not register the runtime (that happens on `start`) and does not clone the repo (the daemon does that at startup). Pointing it at a non-empty directory prompts for confirmation, listing exactly what will be written or overwritten; nothing else in the directory is touched, and **no file is ever deleted**, including on failure. Non-interactive shells refuse instead of prompting — pass `--force` to proceed.
+
+### Configuring manually
+
+A workspace is just a directory with `.gogents/runtime.yaml`, so you can also write one by hand.
 
 **GitHub Issue source:**
 
@@ -169,9 +206,12 @@ internal/
   source/          # Task source adapters (github_issue, local) + dispatcher
   agent/           # LLM agent adapters
   gitops/          # Git operations
+  provision/       # Workspace provisioning (template materialize)
+templates/
+  base/            # Built-in workspace template (embedded into the binary)
 docs/
-  designs/         # Architecture design documents (D01–D08)
-  requirements/    # Requirement specifications (R01–R12)
+  designs/         # Architecture design documents (D01–D09)
+  requirements/    # Requirement specifications (R01–R13)
   changes/         # Change proposals (CH-00x)
   tests/           # Unit test planning
 ```

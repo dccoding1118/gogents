@@ -3,7 +3,6 @@ package foundation
 import (
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -156,49 +155,15 @@ func (s *globalConfigStore) loadUnlocked() (GlobalConfig, error) {
 	return gc, nil
 }
 
-// atomicWrite persists the registry using write-tmp → fsync → rename.
+// atomicWrite persists the registry through the shared AtomicWrite helper.
 // Caller MUST hold the lock.
 func (s *globalConfigStore) atomicWrite(gc GlobalConfig) error {
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o750); err != nil {
-		return fmt.Errorf("failed to create config dir: %w", err)
-	}
-
 	data, err := yaml.Marshal(gc)
 	if err != nil {
 		return fmt.Errorf("failed to marshal global config: %w", err)
 	}
-
-	tmpPath := filepath.Clean(fmt.Sprintf("%s.tmp.%d.%d", s.path, os.Getpid(), time.Now().UnixNano()))
-	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- trusted path
-	if err != nil {
-		return fmt.Errorf("failed to create tmp config file: %w", err)
-	}
-
-	writeOK := false
-	defer func() {
-		if !writeOK {
-			if cErr := f.Close(); cErr != nil {
-				log.Printf("[global_config] failed to close tmp file on cleanup: %v", cErr)
-			}
-			if rErr := os.Remove(tmpPath); rErr != nil {
-				log.Printf("[global_config] failed to remove tmp file on cleanup: %v", rErr)
-			}
-		}
-	}()
-
-	if _, wErr := f.Write(data); wErr != nil {
-		return fmt.Errorf("failed to write global config: %w", wErr)
-	}
-	if sErr := f.Sync(); sErr != nil {
-		return fmt.Errorf("failed to sync global config: %w", sErr)
-	}
-	if cErr := f.Close(); cErr != nil {
-		return fmt.Errorf("failed to close global config: %w", cErr)
-	}
-	writeOK = true
-
-	if rErr := os.Rename(tmpPath, s.path); rErr != nil {
-		return fmt.Errorf("failed to rename global config: %w", rErr)
+	if wErr := AtomicWrite(s.path, data, 0o600); wErr != nil {
+		return fmt.Errorf("failed to persist global config: %w", wErr)
 	}
 	return nil
 }

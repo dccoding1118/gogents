@@ -1,0 +1,25 @@
+runtime_name: {{.Name}}
+
+project:
+  repo:
+    url: "{{.RepoURL}}"
+    default_branch: "{{.Branch}}"
+
+source:
+  type: {{.Source}}
+{{- if eq .Source "github_issue"}}
+  instance: "{{.Instance}}"
+{{- end}}
+{{- if .TicketsPath}}
+  path: "{{.TicketsPath}}"
+{{- end}}
+  filter:
+    label: "{{.Label}}"
+  sync_interval: 30s
+
+agent:
+  type: {{.Agent}}
+  model: "{{.Model}}"
+
+task_policy:
+  max_failures: 3

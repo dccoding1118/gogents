@@ -30,6 +30,7 @@
 | D01-22 | 全域家目錄根 | 未設定 `GOGENTS_HOME` 時的全域路徑解析            | 全域路徑回退為 `$HOME/.gogents`（既有行為）；per-workspace `.gogents/` 路徑不受影響 |
 | D01-23 | GlobalConfigStore | Remove: 以 workspace 路徑或 name 移除            | 命中該筆自 `runtimes[]` 消失、其餘不動、原子寫回；以 name 多筆時同 `Resolve` 規則定位 |
 | D01-24 | GlobalConfigStore | Remove: 目標未註冊                              | 回 `ErrRuntimeNotRegistered`，config.yaml 內容不變 |
+| D01-25 | AtomicWrite    | 寫入新檔與覆蓋既有檔                                   | 內容正確、權限為指定 perm、父目錄自動建立；完成後無 `.tmp.*` 殘留 |
 
 ## D02 Daemon-Sync (同步與維護模組)
 
@@ -156,3 +157,31 @@
 | D08-13 | JSON error    | `--json` 失敗：各 `code`                       | stderr 輸出 `{"error":{"code,message}}`、stdout 無 payload、exit ≠ 0；`runtime_not_found` / `state_not_found` / `internal` 各命中 |
 | D08-14 | Remove        | runtime remove：命中                          | 目標自 config.yaml `runtimes[]` 移除、其餘不動；logs/ 與 workspace `.gogents/` 不受影響 |
 | D08-15 | Remove        | runtime remove：目標未註冊                     | 回 `ErrRuntimeNotRegistered`、exit ≠ 0；config.yaml 不被改動 |
+| D08-16 | CreateOpts    | Validate：必填缺漏／列舉外的值                 | `--repo` / `--agent` / `--model` / `--source` 缺漏，或 `--source` / `--agent` 不在列舉 → 明確錯誤 |
+| D08-17 | CreateOpts    | Validate：預設值套用                           | `--workspace` 空 → `./<name>`；`--label` 空 → `<name>`；`--branch` 空 → `main` |
+| D08-18 | CreateOpts    | Validate：per-source 相容性                    | `github_issue` 缺 `--instance` → 錯；`local` 帶 `--instance`、`github_issue` 帶 `--tickets-dir` → 錯 |
+| D08-19 | Create        | 目標不存在／空目錄                             | 不呼叫 confirm 直接佈建；產出檔案齊全 |
+| D08-20 | Create        | 目標為非空目錄：confirm 回 false               | 回 `ErrWorkspaceNotEmpty`；目錄內容完全未變（無新增檔案） |
+| D08-21 | Create        | 目標為非空目錄：confirm 回 true                | 佈建完成；目錄內既有且不在 template 樹中的檔案內容不變 |
+| D08-22 | Create        | 目標為非空目錄：`--force`                      | 不呼叫 confirm 直接佈建 |
+| D08-23 | Create        | 目標為既有一般檔案                             | 回 `ErrWorkspaceExists`；`--force` 亦不繞過；該檔案不被改動 |
+| D08-24 | Create        | 不註冊、不 clone                               | 佈建後 config.yaml 不變（無新增條目）；workspace 內無 repo 目錄 |
+| D08-25 | Create        | 產出可直接 start                               | 產出的 runtime.yaml 通過 `foundation` ConfigLoader 的 schema 驗證（`local` 與 `github_issue` 各一） |
+| D08-26 | Dispatch      | `runtime create` 參數路由                      | name 為位置參數且其後旗標仍被解析；無 name／name 形如旗標／未定義的 `--json` 皆非零 exit |
+
+## D09 Provision (Workspace 佈建模組)
+
+| 編號   | 測試對象    | 測試情境 (Scenario)                       | 預期結果 (Expected)                                                             |
+| :----- | :---------- | :---------------------------------------- | :------------------------------------------------------------------------------ |
+| D09-01 | Materialize | 佈建至空目錄                              | template 樹各檔落於對應相對路徑；`.tmpl` 去後綴；目錄 `0o750`、檔案 `0o600`；無 `.tmp.*` 殘留 |
+| D09-02 | Materialize | runtime.yaml 展開值                       | `runtime_name` / `project.repo.url` / `default_branch` / `agent.*` / `filter.label` 與 `Spec` 一致 |
+| D09-03 | Materialize | `source` 條件展開：`local`                | 輸出 `source.type: local`；無 `source.instance` |
+| D09-04 | Materialize | `source` 條件展開：`github_issue`         | 輸出 `source.instance`；無 `source.path` |
+| D09-05 | Materialize | `TicketsPath` 有／無                      | 非空 → 輸出 `source.path`；空 → 該欄位不出現 |
+| D09-06 | Materialize | template 引用未知欄位／語法錯             | 回 `ErrTemplateInvalid`（`missingkey=error`），不留空值 |
+| D09-07 | Materialize | 覆蓋既有同名檔                            | 同名檔以新內容覆蓋；同目錄下其他既有檔案內容與 mtime 不變 |
+| D09-08 | Materialize | 寫入中途失敗                              | 回 `ErrIO`；**不刪除**任何已落地檔案；`written` 含失敗前已完成的路徑 |
+| D09-09 | Materialize | 重跑收斂                                  | 同 `Spec` 重跑兩次，結果檔案內容一致 |
+| D09-10 | Inspect     | 四種目標狀態                              | 不存在→`TargetAbsent`；空目錄→`TargetEmptyDir`；非空目錄→`TargetNonEmptyDir`；一般檔案→`TargetNotDir` |
+| D09-11 | Plan        | 覆蓋標示與唯讀性                          | `Entry.Path` 為去 `.tmpl` 的相對路徑；既有檔案 `Overwrite=true`；呼叫後檔案系統無任何變動 |
+| D09-12 | Builtin     | 內建 template 完整性                      | embed FS 含 `.gogents/runtime.yaml.tmpl`、`.claude/CLAUDE.md`、`.claude/skills/`、`.mcp.json`（驗證 `all:` 前綴生效，`.` 開頭路徑未被忽略） |

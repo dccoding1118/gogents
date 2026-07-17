@@ -43,15 +43,23 @@ func Dispatch(args []string) int {
 	}
 }
 
-// runRuntime handles `gogents runtime list`, `gogents runtime status <target>`,
-// and `gogents runtime remove <target>`. list/status accept an opt-in `--json`
-// flag (position-tolerant, D08 §3.4); remove does not.
+// runRuntime handles `gogents runtime create <name>`, `gogents runtime list`,
+// `gogents runtime status <target>`, and `gogents runtime remove <target>`.
+// list/status accept an opt-in `--json` flag (position-tolerant, D08 §3.4);
+// create and remove do not.
 func runRuntime(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: gogents runtime <list|status|remove> [target] [--json]")
+		fmt.Fprintln(os.Stderr, "usage: gogents runtime <create|list|status|remove> [target] [--json]")
 		return 1
 	}
 	sub := args[0]
+
+	// create owns its own flag set and takes no --json; route before the flag is
+	// stripped so `create --json` reports an unknown flag rather than ignoring it.
+	if sub == "create" {
+		return runCreate(args[1:])
+	}
+
 	rest, jsonOut := extractBoolFlag(args[1:], "json")
 	gcfg := foundation.NewGlobalConfigStore()
 
