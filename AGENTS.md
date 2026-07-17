@@ -4,13 +4,13 @@
 
 ## 1. 專案概覽 (Project Overview)
 `gogents` 是一個基於 Go 語言開發的自動化系統，其核心工作流為：
-1. **Sync**: 從外部 Task Source 同步指派任務。來源型別由 `source.type` 決定：`github_issue` (GitHub Issue) 或 `local` (本地 `~/.am/tickets/` ticket inbox，對接 agent-manager)。
+1. **Sync**: 從外部 Task Source 同步指派任務。來源型別由 `source.type` 決定：`github_issue` (GitHub Issue) 或 `local` (本地 ticket inbox，預設 `<GOGENTS_HOME>/tickets/`)。
 2. **Execute**: 根據任務定義，呼叫 LLM Agent (Claude Code) 在本地工作區執行任務 (agent 工作目錄為 workspace 根，使 workspace 級 `.claude/`、`.mcp.json` 生效)。
 3. **Verify & Report**: 執行完成後，依 ticket 宣告的 `verify` (或 fallback `result.json`) 判定成敗，將結果與日誌回傳至來源 (GitHub 留言 / 回寫 ticket 檔)。
 
 workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/runtime.yaml` 與 `.claude/`、`.mcp.json` 等 agent runtime 元素），產出後即可 `gogents start`。template 來源預設為內建（embed），可經 `--template <path|name>` 與 `GOGENTS_TEMPLATES` 指定外部樹。
 
-作為 agent-manager (am) 的執行面：am 派工到 `~/.am/tickets/`，gogents worker daemon 依 label 認領執行、回寫終態；am 經 `gogents runtime status` / `gogents logs` 查詢執行狀態 (單向 `am → gogents`)。
+作為 agent-manager (am) 的執行面：am 派工到自身 ticket inbox 並以絕對路徑寫入 worker 的 `source.path`，gogents worker daemon 依 label 認領執行、回寫終態；am 經 `gogents runtime status` / `gogents logs` 查詢執行狀態 (單向 `am → gogents`)。
 
 ## 2. 目錄結構與導覽 (Directory Structure)
 
@@ -34,7 +34,7 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
     - `claude.go`: 具體的 Agent 實現。
 - `internal/source/`: 外部任務來源適配器 (TaskSource / SourceProbe / ContentFetcher / FeedbackReporter)。
     - `github.go`: `github_issue` 實作，透過 `gh` CLI 存取 Issues。
-    - `local*.go`: `local` 實作，讀 `~/.am/tickets/` ticket inbox、依 label 認領、回寫終態。
+    - `local*.go`: `local` 實作，讀 ticket inbox (`source.path`，省略時 `<GOGENTS_HOME>/tickets/`)、依 label 認領、回寫終態。
     - `dispatcher.go`: 依 `source.type` 分派 concrete strategy 的 factory (`NewTaskSourceFromConfig` 等)。
 - `internal/execution/`: 任務執行引擎。
     - `runner.go`: 控制任務執行的具體流程 (Prepare -> Run -> Verify -> Judge)；agent 工作目錄為 workspace 根。

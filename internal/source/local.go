@@ -15,11 +15,8 @@ import (
 	"github.com/dccoding1118/gogents/internal/logger"
 )
 
-// defaultTicketInbox is the am ticket inbox used when source.path is empty.
-const defaultTicketInbox = "~/.am/tickets"
-
-// ticketFile mirrors the subset of the am ticket schema gogents reads or writes.
-// Governance fields owned by am (mission, depends_on, approvals, risk, ...) are
+// ticketFile mirrors the subset of the ticket contract (R11) gogents reads or
+// writes. Fields the contract does not define are owned by the producer and are
 // captured by the inline Extra map so they survive a write-back untouched.
 type ticketFile struct {
 	ID        string         `yaml:"id,omitempty"`
@@ -38,11 +35,11 @@ type ticketVerify struct {
 	Extra map[string]any `yaml:",inline"`
 }
 
-// expandTicketDir resolves source.path, defaulting to ~/.am/tickets and
-// expanding a leading ~/.
+// expandTicketDir resolves source.path, defaulting to <GlobalHome>/tickets (so
+// the inbox follows GOGENTS_HOME isolation) and expanding a leading ~/.
 func expandTicketDir(p string) string {
 	if strings.TrimSpace(p) == "" {
-		p = defaultTicketInbox
+		return filepath.Join(foundation.GlobalHome(), "tickets")
 	}
 	if strings.HasPrefix(p, "~/") {
 		if home, err := os.UserHomeDir(); err == nil && home != "" {
@@ -147,9 +144,8 @@ func (s *localTicketSource) List(_ context.Context, filter SourceFilter) ([]Sour
 		if t.Worker != want {
 			continue
 		}
-		// am's dispatch gate: only status == queued means the ticket's
-		// depends_on are satisfied and it may be claimed. blocked / terminal /
-		// missing states are left for am to advance.
+		// Only queued tickets may be claimed; every other value (including
+		// empty) leaves dispatch timing to the producer.
 		if t.Status != "queued" {
 			continue
 		}
@@ -228,7 +224,7 @@ func (f *localTicketContentFetcher) Fetch(_ context.Context, taskID string) (Tas
 		URL:    "file://" + p,
 		Title:  t.Goal,
 		Body:   t.Context,
-		Author: "am",
+		Author: "local",
 	}, nil
 }
 
@@ -278,7 +274,7 @@ func (r *localTicketReporter) Report(_ context.Context, in FeedbackInput) Feedba
 
 	switch in.Trigger {
 	case TriggerTaskCreated, TriggerProcessingStarted:
-		// am owns the ticket lifecycle up to dispatch; gogents only writes the
+		// The producer owns the ticket up to dispatch; gogents only writes the
 		// terminal execution result. Nothing to write here.
 		return FeedbackOutcome{Result: FeedbackSuccess}
 
@@ -321,7 +317,7 @@ func (r *localTicketReporter) Report(_ context.Context, in FeedbackInput) Feedba
 	return FeedbackOutcome{Result: FeedbackSuccess}
 }
 
-// writeBack reads the ticket (preserving governance fields), sets the terminal
+// writeBack reads the ticket (preserving producer-owned fields), sets the terminal
 // status/result/updated_at, and atomically rewrites it.
 func (r *localTicketReporter) writeBack(taskID, status string, result map[string]any) error {
 	p := ticketPath(r.dir, taskID)

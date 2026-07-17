@@ -22,7 +22,7 @@
 | D01-14 | TaskStore      | Transition: 合法狀態轉換 (如 `queued` -> `processing`) | 狀態成功變更，且 patch 欄位正確套用並存檔                 |
 | D01-15 | TaskStore      | Transition: 非法狀態轉換 (如 `queued` -> `done`)       | 回傳 `ErrIllegalTransition` 且不更新 `task.yaml`          |
 | D01-16 | TaskStore      | UpdateFields: 特定欄位更新                             | 成功更新如 `CommentID` 等欄位，且 `Status` 保持不變       |
-| D01-17 | ConfigLoader   | Load: `source.type: local` 設定                       | 正確解析 `source.path` / `filter.label`；`path` 省略時預設 `~/.am/tickets` |
+| D01-17 | ConfigLoader   | Load: `source.type: local` 設定                       | 正確解析 `source.path` / `filter.label`；`path` 省略時預設 `<GOGENTS_HOME>/tickets` |
 | D01-18 | GlobalConfigStore | Upsert: 新 workspace 註冊                          | config.yaml `runtimes` 新增一筆 `{name, workspace, registered_at}`，無 `active_runtime` |
 | D01-19 | GlobalConfigStore | Upsert: 同 workspace 路徑重複註冊                  | 以 workspace 為 key 覆蓋更新 `name` / `registered_at`，不新增第二筆 |
 | D01-20 | GlobalConfigStore | Resolve: 以 workspace 路徑或 name 反查            | 路徑精確匹配；同 name 多筆時回 `registered_at` 最近者；未註冊回 `ErrRuntimeNotRegistered` |
@@ -124,18 +124,19 @@
 | 編號   | 測試對象         | 測試情境 (Scenario)                       | 預期結果 (Expected)                                                              |
 | :----- | :--------------- | :---------------------------------------- | :------------------------------------------------------------------------------- |
 | D07-01 | LocalSource      | List: 依 label 過濾 ticket                | 僅回傳 `worker` 等於 `filter.label` 的 ticket，映射為 `SourceTask` (TaskID=ticket id) |
-| D07-01a| LocalSource      | List: `status == queued` 閘門             | 同 label 下,`queued` 被認領;`blocked` / `done` / `failed` / `awaiting_review` 及 `status` 缺失/空一律不認領 |
+| D07-01a| LocalSource      | List: `status == queued` 閘門             | 同 label 下,`queued` 被認領;其餘 `status` 值及缺失/空一律不認領                 |
 | D07-01b| LocalSource      | List: label × status 交叉過濾             | 他 label 的 `queued` 不認領、本 label 的非 `queued` 不認領;僅本 label 且 `queued` 回傳 |
 | D07-02 | LocalSource      | List: 單一 ticket 格式錯誤                | 記 `source.ticket_parse_failed` 並略過該筆，其餘正常回傳                          |
-| D07-03 | LocalSource      | Get: ticket 檔不存在                      | 回 `ErrSourceNotFound` (對應 am 刪除 ticket)                                     |
+| D07-03 | LocalSource      | Get: ticket 檔不存在                      | 回 `ErrSourceNotFound` (對應 producer 刪除 ticket)                               |
 | D07-04 | LocalSource      | Get: 讀取/解析失敗                        | 回 `ErrSourceTransient` (保守，下輪重試)                                         |
-| D07-05 | LocalProbe       | CheckSource: `source.path` 不存在/不可讀 | 回 `SourceProbeError`，Preflight 拒啟                                            |
+| D07-05 | LocalProbe       | CheckSource: `source.path` 不存在/不可讀 | 回 `SourceProbeError`，Preflight 拒啟；不建立該目錄                              |
+| D07-05a| LocalSource      | inbox 預設路徑解析                        | `source.path` 省略時 inbox 為 `<GOGENTS_HOME>/tickets`；顯式 `source.path` 原樣採用（僅展開開頭 `~/`） |
 | D07-06 | LocalFetcher     | Fetch: 由 ticket 組 TaskContent           | Title=`goal`、Body=`context`、Comments 為空                                      |
 | D07-07 | LocalVerifier    | VerifySpec: ticket 宣告/未宣告 verify     | 宣告回 `(Spec{Cmd}, true, nil)`；未宣告回 `(_, false, nil)`                      |
-| D07-08 | LocalReporter    | Report: CodingSuccess 回寫 (code)         | ticket `status: done`、`result: {type: code, pr_url, branch, commit}`、`updated_at` 更新；治理欄位不變 |
+| D07-08 | LocalReporter    | Report: CodingSuccess 回寫 (code)         | ticket `status: done`、`result: {type: code, pr_url, branch, commit}`、`updated_at` 更新；契約未定義的欄位不變 |
 | D07-09 | LocalReporter    | Report: CodingSuccess 無 pr_url (artifacts) | `result: {type: artifacts, items: [...]}`                                     |
 | D07-10 | LocalReporter    | Report: CodingFailed 回寫                 | ticket `status: failed`、寫失敗 result/message                                   |
-| D07-11 | LocalReporter    | Report: 原子寫入與保留未知欄位            | 回寫後 ticket 仍為合法 YAML；`mission` / `depends_on` 等治理欄位原樣保留，無暫存檔殘留 |
+| D07-11 | LocalReporter    | Report: 原子寫入與保留未知欄位            | 回寫後 ticket 仍為合法 YAML；契約未定義的欄位（如 `mission` / `depends_on`）原樣保留，無暫存檔殘留 |
 | D07-12 | LocalReporter    | Report: 回寫 IO 失敗                      | 回 `FeedbackFailure`，記 `source.ticket_report_failed`                           |
 
 ## D08 Runtime-CLI (註冊與觀測模組)

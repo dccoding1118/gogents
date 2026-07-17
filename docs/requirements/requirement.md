@@ -7,7 +7,7 @@
 ## 核心假設與範圍
 
 - 單一 daemon 對應單一 workspace、單一 git repo、單一任務來源
-- 任務來源型別由 `source.type` 決定:`github_issue`(遠端 GitHub Issue)或 `local`(本地 `~/.am/tickets/` ticket inbox);兩者共用同一套 task store、狀態機與執行流程
+- 任務來源型別由 `source.type` 決定:`github_issue`(遠端 GitHub Issue)或 `local`(本地 ticket inbox);兩者共用同一套 task store、狀態機與執行流程
 - Workspace 內的 agent runtime 元素(`.claude/CLAUDE.md`、`.claude/skills/`、`.mcp.json` 等)由 `gogents runtime create` 依內建 template 佈建(見 R13),使用者可續行修改;daemon 執行期不管理這些檔案。repo 內的 AGENTS.md 由使用者自行維護。agent 以 workspace 根為工作目錄,使 workspace 級專長配置生效
 - 一次循序處理一個任務,避免 git 狀態衝突
 - 目前版本不做容器化、不做 admin 通道、不做多 workspace 管理
@@ -46,7 +46,7 @@ R06 → R07 → R08。完成後系統就能跑完整流程: 開任務 → daemon
 R10。 處理各種失敗情境: agent CLI 崩潰、git 失敗、GitHub API 失敗、daemon 重啟後的狀態恢復。
 
 **Stage 5 — agent-manager (am) 整合**
-R11 → R12。新增 `local` 任務源(讀 `~/.am/tickets/` ticket inbox、依 label 與 `status == queued` 過濾、ticket `verify` 驗證、終態 result 回寫 ticket 檔),以及 runtime 註冊(`start` 寫入 `~/.gogents/config.yaml`)與觀測 CLI(`gogents runtime list/status`、`gogents logs`)。完成後 am 可佈署 worker、派工、查詢執行狀態與匯出稽核。
+R11 → R12。新增 `local` 任務源(讀本地 ticket inbox、依 label 與 `status == queued` 過濾、ticket `verify` 驗證、終態 result 回寫 ticket 檔),以及 runtime 註冊(`start` 寫入 `~/.gogents/config.yaml`)與觀測 CLI(`gogents runtime list/status`、`gogents logs`)。完成後 am 可佈署 worker、派工、查詢執行狀態與匯出稽核。
 
 **Stage 6 — Workspace 佈建**
 R13。新增 `gogents runtime create`:由內建 template 佈建出可直接 `start` 的 workspace(`.gogents/runtime.yaml` 與 agent runtime 元素)。完成後使用者無需手寫 runtime.yaml 即可起用一個 runtime。
@@ -129,21 +129,22 @@ graph LR
 | `logs/<workspace-hash>/daemon.jsonl` | Daemon 執行日誌           | Daemon      | R09    |
 | `logs/<workspace-hash>/error.jsonl`  | Daemon 錯誤日誌           | Daemon      | R09    |
 
-### 本地任務源檔案(位於 `~/.am/tickets/`,`source.type: local` 時)
+### 本地任務源檔案(位於 `source.path`,預設 `<全域家目錄根>/tickets/`,`source.type: local` 時)
 
 | 檔案路徑              | 用途                          | 寫入者              | 定義於 |
 | --------------------- | ----------------------------- | ------------------- | ------ |
-| `<ticket-id>.yaml`    | am 產出的 ticket(任務單);gogents 讀執行所需欄位、回寫 `status` 與 `result` | am(建立)/Daemon(回寫終態) | R11 |
+| `<ticket-id>.yaml`    | ticket(任務單);gogents 讀執行所需欄位、回寫 `status` 與 `result` | producer(建立)/Daemon(回寫終態) | R11 |
 
 ## 術語表
 
 - **Workspace**: 單一 daemon 管理的工作目錄,內含一個 git repo 與 `.gogents/` 管理檔案
 - **Runtime**: 一組 workspace + daemon 的配對,以 `runtime_name` 識別;`start` 時以 **workspace 路徑為 key** 註冊到 `~/.gogents/config.yaml`
-- **Task**: 從任務來源衍生的一個開發工作單位(GitHub Issue 或 am ticket)
+- **Task**: 從任務來源衍生的一個開發工作單位(GitHub Issue 或本地 ticket)
 - **Task ID**: 任務的唯一識別字串,格式依 `source.type` 決定:`github_issue` 為 `github-<issue-number>`;`local` 為 ticket 的 `id`
 - **Agent CLI**: 本機已安裝好的 coding agent 命令列工具(如 `claude` 等)
 - **Worker State**: `state.yaml` 記錄的顯式執行階段(`idle` / `executing` / `verifying` / `reporting` / `failed` / `broken`);`down` 由查詢端依 pid 不存在推得,不落檔
 - **agent-manager (am)**: 本機 Agent 運作環境的控制面(Tower);產出 ticket 交 gogents 執行,並向 gogents 查詢 runtime 狀態與日誌。am 側「worker/ticket」對應 gogents 側「runtime/task」
-- **Ticket**: am 產出的任務單,`source.type: local` 時為 gogents 的任務來源;YAML 檔置於 `~/.am/tickets/<id>.yaml`
+- **Ticket**: `source.type: local` 時 gogents 的任務來源;YAML 檔置於 `<source.path>/<id>.yaml`,契約由 R11 定義
+- **Producer**: 依 R11 契約寫出 ticket 到 inbox 的工具(am 為其中一種);gogents 不限定 producer 身分
 - **Coding 階段**: 從任務 queued 轉為 processing 開始,直到 agent 寫出 result.json 並結束 CLI 為止。斷點為 result.json status=success 且 pr_url 存在
 - **Reporting 階段**: Coding 階段成功結束後,daemon 將結果回寫到 GitHub(更新 comment、切換 label)的階段。此階段失敗會使任務停駐於 `reporting` 狀態
