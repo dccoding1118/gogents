@@ -26,7 +26,7 @@ import (
 func Dispatch(args []string) int {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: gogents <command> [options]")
-		fmt.Fprintln(os.Stderr, "commands: start, runtime, logs")
+		fmt.Fprintln(os.Stderr, "commands: start, runtime, logs, version")
 		return 1
 	}
 
@@ -37,6 +37,8 @@ func Dispatch(args []string) int {
 		return runRuntime(args[1:])
 	case "logs":
 		return runLogs(args[1:])
+	case "version", "--version":
+		return runVersion()
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", args[0])
 		return 1

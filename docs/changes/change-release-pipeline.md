@@ -77,4 +77,5 @@ gogents 公開化後，使用者取得工具的路徑必須不經原始碼建置
 ## 6. 關聯
 
 - template 來源解析與 `--template` / `GOGENTS_TEMPLATES`：CH-008、R13、D09。
-- 公開化定位重寫（README／AGENTS／R 系列拔除「am 的執行面」定位）→ CH-011。
+- 產物的版本資訊（`version` 指令與建置期 `-ldflags` 注入）→ CH-011。
+- 公開化定位重寫（README／AGENTS／R 系列拔除「am 的執行面」定位）→ CH-012。

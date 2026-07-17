@@ -250,6 +250,21 @@ bin/gogents runtime remove <workspace|name>
 
 `runtime list` and `runtime status` accept an opt-in `--json` flag for a stable machine-readable contract (used by the am adapter): a runtime array or a single status object on stdout, and a structured `{"error":{"code","message"}}` object on stderr with a non-zero exit on failure. Timestamps are RFC3339; an empty `last_sync_at` is `""`. Without `--json` the text output is unchanged.
 
+### Version
+
+```bash
+gogents version     # `gogents --version` is equivalent
+```
+
+```
+gogents v0.1.0
+commit:   1a2b3c4 (2026-07-17T08:30:00Z)
+go:       go1.23.0
+platform: darwin/arm64
+```
+
+Release binaries carry their tag, commit and build time, injected at build time — quote the output when reporting an issue. A binary built from source instead reports `dev` with the commit it was built from, suffixed `-dirty` if the work tree had uncommitted changes.
+
 ## agent-manager Integration
 
 GoGents is the **execution plane** for [agent-manager](https://github.com/dccoding1118/agent-manager) (am), the local agent control plane (Tower). am produces tickets into its own inbox and points the worker's `source.path` at it; a GoGents worker daemon configured with `source.type: local` claims tickets matching its worker label whose `status` is `queued` (am uses `status` as its dispatch gate — `blocked` and other states are left untouched), executes them, runs the ticket's `verify` command, and writes the terminal `status` and `result` back to the ticket file. Communication is one-way (`am → gogents`): am queries live execution state via `gogents runtime status` / `gogents logs` rather than caching it. See `docs/requirements/reqs/R11-local-source.md` and `R12-runtime-observability.md`.
