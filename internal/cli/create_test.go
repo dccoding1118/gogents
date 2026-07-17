@@ -255,6 +255,82 @@ func TestRuntimeCreateDispatch(t *testing.T) {
 	}
 }
 
+// TestCreateTemplateFlag covers D08-27 through D08-29: how the command layer
+// handles --template. The resolution rules themselves live in provision.
+func TestCreateTemplateFlag(t *testing.T) {
+	t.Setenv("GOGENTS_HOME", t.TempDir())
+	t.Setenv("GOGENTS_TEMPLATES", "")
+
+	t.Run("D08-27 --template= is an error, not a way to ask for the built-in", func(t *testing.T) {
+		ws := filepath.Join(t.TempDir(), "demo")
+		code := Dispatch([]string{
+			"runtime", "create", "demo", "--template=", "--workspace", ws,
+			"--repo", "https://github.com/o/r",
+			"--agent", "claude", "--model", "claude-sonnet-5", "--source", "local",
+		})
+		if code == 0 {
+			t.Fatal("expected a non-zero exit")
+		}
+		if _, err := os.Stat(ws); !os.IsNotExist(err) {
+			t.Fatal("a rejected flag must not provision anything")
+		}
+	})
+
+	t.Run("D08-28 resolution failure precedes the confirmation and any write", func(t *testing.T) {
+		ws := t.TempDir()
+		if err := os.WriteFile(filepath.Join(ws, "keepme.txt"), []byte("mine"), 0o600); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+
+		o := localOpts(ws)
+		o.Template = filepath.Join(t.TempDir(), "nope")
+		// A non-empty target would normally prompt; the template is unresolvable,
+		// so there is nothing to confirm.
+		_, err := Create(o, neverConfirm(t))
+		if !errors.Is(err, provision.ErrTemplateNotFound) {
+			t.Fatalf("err = %v, want ErrTemplateNotFound", err)
+		}
+
+		entries, rErr := os.ReadDir(ws)
+		if rErr != nil {
+			t.Fatalf("readdir: %v", rErr)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("nothing may be written, found %d entries", len(entries))
+		}
+	})
+
+	t.Run("D08-29 --template is orthogonal to --source", func(t *testing.T) {
+		tplRoot := t.TempDir()
+		tpl := filepath.Join(tplRoot, "my-tpl")
+		if err := os.MkdirAll(filepath.Join(tpl, ".gogents"), 0o750); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tpl, ".gogents", "runtime.yaml.tmpl"),
+			[]byte("source: \"{{.Source}}\"\n"), 0o600); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+
+		for name, mutate := range map[string]func(*CreateOpts){
+			"local": func(*CreateOpts) {},
+			"github_issue": func(o *CreateOpts) {
+				o.Source = "github_issue"
+				o.Instance = "o/r"
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				ws := filepath.Join(t.TempDir(), "demo")
+				o := localOpts(ws)
+				o.Template = tpl
+				mutate(&o)
+				if _, err := Create(o, neverConfirm(t)); err != nil {
+					t.Fatalf("create: %v", err)
+				}
+			})
+		}
+	})
+}
+
 // TestCreateOutputStarts covers D08-25: the generated runtime.yaml satisfies the
 // config schema, so `gogents start` accepts the workspace as-is.
 func TestCreateOutputStarts(t *testing.T) {

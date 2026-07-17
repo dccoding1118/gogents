@@ -168,6 +168,9 @@
 | D08-24 | Create        | 不註冊、不 clone                               | 佈建後 config.yaml 不變（無新增條目）；workspace 內無 repo 目錄 |
 | D08-25 | Create        | 產出可直接 start                               | 產出的 runtime.yaml 通過 `foundation` ConfigLoader 的 schema 驗證（`local` 與 `github_issue` 各一） |
 | D08-26 | Dispatch      | `runtime create` 參數路由                      | name 為位置參數且其後旗標仍被解析；無 name／name 形如旗標／未定義的 `--json` 皆非零 exit |
+| D08-27 | Create        | `--template` 空字串                            | `--template=` 回旗標驗證錯誤；不等同省略、不走內建 template |
+| D08-28 | Create        | `--template` 解析失敗先於確認與寫入            | 指向不存在的目錄時回 `ErrTemplateNotFound`；confirm **未被呼叫**；目標目錄未建立、無任何檔案落地 |
+| D08-29 | Create        | `--template` 與 `--source` 正交                | 任一 template 來源皆可搭配 `local` 與 `github_issue`；`--template` 不觸發 per-source 相容性錯誤 |
 
 ## D09 Provision (Workspace 佈建模組)
 
@@ -185,3 +188,12 @@
 | D09-10 | Inspect     | 四種目標狀態                              | 不存在→`TargetAbsent`；空目錄→`TargetEmptyDir`；非空目錄→`TargetNonEmptyDir`；一般檔案→`TargetNotDir` |
 | D09-11 | Plan        | 覆蓋標示與唯讀性                          | `Entry.Path` 為去 `.tmpl` 的相對路徑；既有檔案 `Overwrite=true`；呼叫後檔案系統無任何變動 |
 | D09-12 | Builtin     | 內建 template 完整性                      | embed FS 含 `.gogents/runtime.yaml.tmpl`、`.claude/CLAUDE.md`、`.claude/skills/`、`.mcp.json`（驗證 `all:` 前綴生效，`.` 開頭路徑未被忽略） |
+| D09-13 | Materialize / Plan | 來源樹含非一般檔案                 | 樹內含 symlink 時二者皆回 `ErrTemplateInvalid`，不靜默略過；`Plan` 亦檢查使無效的樹於確認提示前即失敗 |
+| D09-14 | Resolve     | 未給 `--template`                         | 空字串回內建樹；`GOGENTS_TEMPLATES` 已設定時**仍**回內建樹（該變數只在名稱形式生效） |
+| D09-15 | Resolve     | 路徑形式                                  | 含分隔符的值（`./x`、`../x`、`/abs/x`、`a/b`）回該目錄；設有 `GOGENTS_TEMPLATES` 時亦不受其影響 |
+| D09-16 | Resolve     | 名稱形式 + `GOGENTS_TEMPLATES` 已設定     | 回 `$GOGENTS_TEMPLATES/<name>/`；當前目錄存在同名目錄時仍取變數底下者 |
+| D09-17 | Resolve     | 名稱形式 + `GOGENTS_TEMPLATES` 未設定     | 回 `<當前目錄>/<name>/` |
+| D09-18 | Resolve     | 名稱形式在變數底下不存在                  | 回 `ErrTemplateNotFound`；**不回退**至當前目錄、不落回內建樹 |
+| D09-19 | Resolve     | 形式判別只看字面                          | 當前目錄存在 `x/` 時，`x` 仍判為名稱形式（設有變數即查變數底下）；`./x` 才為路徑形式 |
+| D09-20 | Resolve     | 來源不存在／非目錄                        | 路徑形式指向不存在的路徑或一般檔案 → `ErrTemplateNotFound`（於 `Resolve` 即回，不延至走訪） |
+| D09-21 | Resolve     | 不疊加                                    | 外部樹缺 `.mcp.json` 時，`Materialize` 產出不含 `.mcp.json`（不與內建樹合併） |

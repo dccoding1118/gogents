@@ -4,6 +4,10 @@
 // is copied verbatim. It never deletes anything under the target: failures leave
 // what already landed in place and report it to the caller.
 //
+// Resolve is the only place that decides where a template tree comes from;
+// everything after it works on an fs.FS and is oblivious to whether the tree is
+// the built-in one or a directory the user pointed at.
+//
 // Interactive confirmation lives in the command layer: this package only
 // classifies the target (Inspect) and lists what would land (Plan).
 package provision
@@ -22,9 +26,19 @@ import (
 	"github.com/dccoding1118/gogents/templates"
 )
 
+// envTemplates names the directory that holds the user's template trees, one
+// subdirectory per template name. It is independent of GOGENTS_HOME: the global
+// home is a state directory for the registry and logs, never a template location.
+const envTemplates = "GOGENTS_TEMPLATES"
+
 var (
+	// ErrTemplateNotFound marks a template source that does not resolve to a
+	// directory. It is always reported before anything is written, which is why
+	// it is distinct from ErrTemplateInvalid — that one can leave files behind.
+	ErrTemplateNotFound = errors.New("template not found")
 	// ErrTemplateInvalid marks a template that cannot be parsed or rendered
-	// (syntax error, or a field the Spec does not carry).
+	// (syntax error, or a field the Spec does not carry), or a tree holding
+	// something other than regular files and directories.
 	ErrTemplateInvalid = errors.New("template invalid")
 	// ErrWorkspaceExists marks a target path occupied by a non-directory.
 	ErrWorkspaceExists = errors.New("workspace path exists and is not a directory")
@@ -72,6 +86,68 @@ type Entry struct {
 // Builtin returns the template tree embedded in the binary.
 func Builtin() fs.FS { return templates.Base() }
 
+// Resolve picks the one template tree to provision from (D09 §3.1). template is
+// the --template value; "" means the flag was omitted and selects the built-in
+// tree. The sources are mutually exclusive and never layered: whichever matches
+// first is the whole tree.
+//
+//	path form (contains a separator) → that directory, ignoring $GOGENTS_TEMPLATES
+//	name form, $GOGENTS_TEMPLATES set → $GOGENTS_TEMPLATES/<name>
+//	name form, $GOGENTS_TEMPLATES unset → <cwd>/<name>
+//
+// An external source that does not resolve to a directory is an error rather
+// than a fall back to the built-in tree: the user named a tree, and silently
+// handing them a different one produces a workspace that looks provisioned but
+// holds something else entirely.
+func Resolve(template string) (fs.FS, error) {
+	if template == "" {
+		// The embedded tree is fixed at build time; there is nothing to check.
+		return Builtin(), nil
+	}
+
+	dir, origin := template, "the path given"
+	if !isPathForm(template) {
+		if base := os.Getenv(envTemplates); base != "" {
+			dir = filepath.Join(base, template)
+			origin = "$" + envTemplates
+		} else {
+			origin = "the current directory ($" + envTemplates + " is not set)"
+		}
+	}
+
+	// Check here rather than leaving it to os.DirFS, which validates nothing:
+	// the failure would surface during the walk, where it is no longer
+	// distinguishable from a tree that went missing mid-provision.
+	info, err := os.Stat(dir) //nolint:gosec // dir is the template the user asked for; pointing at an arbitrary path is the feature
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s (resolved from %s)", ErrTemplateNotFound, absOrRaw(dir), origin)
+		}
+		return nil, fmt.Errorf("%w: stat %s: %v", ErrIO, absOrRaw(dir), err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("%w: %s is not a directory (resolved from %s)", ErrTemplateNotFound, absOrRaw(dir), origin)
+	}
+	return os.DirFS(dir), nil
+}
+
+// isPathForm reports whether template names a location rather than a template
+// name. The check is on the literal value, not on what exists: `rust-svc` stays
+// a name even when ./rust-svc happens to be there, so resolution depends only on
+// the input. Write ./rust-svc to mean the directory.
+func isPathForm(template string) bool {
+	return strings.ContainsRune(template, '/') || strings.ContainsRune(template, filepath.Separator)
+}
+
+// absOrRaw makes a path absolute for error messages, falling back to the raw
+// value: a resolution error must not be masked by a failure to pretty-print it.
+func absOrRaw(dir string) string {
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
 // Inspect classifies workspace so the command layer can decide whether to
 // proceed, prompt, or refuse. It reads nothing but directory metadata.
 func Inspect(workspace string) (TargetState, error) {
@@ -106,15 +182,32 @@ func Plan(src fs.FS, workspace string) ([]Entry, error) {
 		if d.IsDir() {
 			return nil
 		}
+		if rErr := checkRegular(p, d); rErr != nil {
+			return rErr
+		}
 		target := strings.TrimSuffix(p, ".tmpl")
 		_, sErr := os.Stat(filepath.Join(workspace, filepath.FromSlash(target)))
 		entries = append(entries, Entry{Path: target, Overwrite: sErr == nil})
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrTemplateInvalid) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("%w: walk template: %v", ErrIO, err)
 	}
 	return entries, nil
+}
+
+// checkRegular rejects anything that is neither a regular file nor a directory.
+// An external tree can hold symlinks, devices and sockets, which the embedded
+// tree never can. Skipping them silently would provision a workspace that looks
+// complete but is missing files, so the walk stops instead (D09 B1a).
+func checkRegular(p string, d fs.DirEntry) error {
+	if d.Type().IsRegular() {
+		return nil
+	}
+	return fmt.Errorf("%w: %s is not a regular file (%s)", ErrTemplateInvalid, p, d.Type())
 }
 
 // Materialize expands src into workspace. written lists the workspace-relative
@@ -132,6 +225,9 @@ func Materialize(src fs.FS, workspace string, spec Spec) (written []string, err 
 				return fmt.Errorf("%w: create dir %s: %v", ErrIO, dst, mErr)
 			}
 			return nil
+		}
+		if cErr := checkRegular(p, d); cErr != nil {
+			return cErr
 		}
 
 		data, rErr := fs.ReadFile(src, p)

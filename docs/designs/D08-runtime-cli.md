@@ -2,7 +2,7 @@
 
 涵蓋需求：R12（Runtime 註冊與觀測）、R13（Workspace 佈建的命令面）。
 
-本模組提供 `gogents` 的 runtime 命令介面：`gogents runtime create` 佈建出一個可直接 `start` 的 workspace（materialize 由 D09 執行）；`gogents start` 於啟動時將 runtime 註冊寫入 config.yaml（位於全域家目錄根,預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫,見 D01 §3;以 workspace 路徑為 key）；`gogents runtime list` / `gogents runtime status` / `gogents logs` 供使用者與 agent-manager (am) 列出、查詢、匯出 runtime 狀態與日誌；`gogents runtime remove` 供 am 從註冊表反註冊退役／測試 runtime,取代手改 config.yaml。am 不維護執行狀態副本,一律經此介面查詢（單向 `am → gogents`）。
+本模組提供 `gogents` 的 runtime 命令介面：`gogents runtime create` 由 template 佈建出一個可直接 `start` 的 workspace,template 來源預設為內建、可經 `--template` 指定（來源解析與 materialize 皆由 D09 執行）；`gogents start` 於啟動時將 runtime 註冊寫入 config.yaml（位於全域家目錄根,預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫,見 D01 §3;以 workspace 路徑為 key）；`gogents runtime list` / `gogents runtime status` / `gogents logs` 供使用者與 agent-manager (am) 列出、查詢、匯出 runtime 狀態與日誌；`gogents runtime remove` 供 am 從註冊表反註冊退役／測試 runtime,取代手改 config.yaml。am 不維護執行狀態副本,一律經此介面查詢（單向 `am → gogents`）。
 
 ## 1. 模組架構與周邊模組關聯
 
@@ -14,7 +14,7 @@ runtime-cli 是**唯讀觀測層 + 註冊表寫入點 + 佈建命令面**。註�
   - **D01 foundation**：`GlobalConfigStore`（Load / Upsert / Resolve / Remove，見 D01 §4）;`WorkspacePaths`（推 workspace-hash → logs 路徑、state.yaml 路徑）。
   - **D02 daemon-sync**：`StateStore.Load`（讀 `state.yaml` 的 `runtime_state` / `daemon.pid` / `current_task` / `sync`）。
   - **D04 logger**：`gogents start` 已開 logger;查詢與 `create` 子指令為短命 CLI,直接輸出 stdout,不寫 daemon 日誌。
-  - **D09 provision**：`Builtin` / `Inspect` / `Plan` / `Materialize`（`runtime create` 的 materialize 與目標狀態判定）。
+  - **D09 provision**：`Resolve` / `Inspect` / `Plan` / `Materialize`（`runtime create` 的 template 來源解析、目標狀態判定與 materialize）。
   - **OS**：pid 存活檢核（`kill(pid, 0)` 或讀 `/proc/<pid>`）;stdin 是否為終端（`runtime create` 的確認提示）。
 - **被依賴**：CLI 入口 `cmd/gogents`;am 以子行程呼叫本模組的三個查詢子指令。
 - **I/O 邊界**：讀 `~/.gogents/config.yaml`、`<workspace>/.gogents/state.yaml`、`~/.gogents/logs/<hash>/*.jsonl`;寫 `~/.gogents/config.yaml`（`start` 的 upsert 與 `runtime remove` 的移除）;`runtime create` 經 D09 寫目標 workspace。（全域家目錄根預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫。）
@@ -149,6 +149,7 @@ exit code 維持現行（非零即可）,失敗分類以 `error.code` 表達,不
 | 旗標 | 必填 | 預設 | 落點 |
 | --- | --- | --- | --- |
 | `<name>`（位置參數） | 是 | — | `Spec.Name` → `runtime_name` |
+| `--template` | 否 | 空（＝內建 template） | `provision.Resolve` 的來源選擇（§3.7） |
 | `--workspace` | 否 | `./<name>` | 佈建目標路徑 |
 | `--repo` | 是 | — | `Spec.RepoURL` |
 | `--branch` | 否 | `main` | `Spec.Branch` |
@@ -177,6 +178,15 @@ exit code 維持現行（非零即可）,失敗分類以 `error.code` 表達,不
 提示訊息需明確表達後果：目錄非空,將寫入 agent 運作環境配置（列出目標路徑,標示哪些為既有檔案的覆蓋）,其餘檔案不受影響。**非互動時不預設同意**:CI／腳本情境下靜默覆蓋使用者目錄的風險高於失敗。
 
 **終端判定**：以真正的 TTY 檢核（`term.IsTerminal`）判斷 stdin,非以 `os.ModeCharDevice` 判斷——`/dev/null` 亦為 character device,後者會把 `< /dev/null` 誤判為互動終端。
+
+### 3.7 `--template` 的命令層職責
+
+來源解析規則屬 D09（`provision.Resolve`,見 D09 §3.1）;本層只負責兩件事:
+
+- **空值攔截**:`--template=`（給了旗標但值為空）視為旗標驗證錯誤,exit ≠ 0。空字串在 D09 是「未給旗標 → 內建 template」的訊號,若原樣傳下去會把一個明顯的輸入錯誤靜默解讀成預設行為。省略旗標才是預設。
+- **解析時機**:`Resolve` 於 `Inspect` 之前呼叫,使來源解析失敗一律發生在任何寫入與任何確認提示之前——不對一個註定失敗的佈建提示使用者確認覆蓋。
+
+`--template` **不參與 per-source 相容性驗證**:template 來源與 `--source` 正交,任何 template 樹皆可搭配任何 source。
 
 ## 4. 關鍵介面
 
@@ -207,6 +217,7 @@ func Create(opts CreateOpts, confirm func(entries []provision.Entry) bool) (writ
 // 相容性,並套用預設值（Workspace←./<Name>、Label←Name、Branch←"main"）。
 type CreateOpts struct {
     Name        string
+    Template    string
     Workspace   string
     RepoURL     string
     Branch      string
@@ -300,7 +311,8 @@ Remove(gcfg, target):
 ```
 Create(opts, confirm):
   opts.Validate()                            // 必填 / 列舉 / per-source 相容 / 套預設
-  src := provision.Builtin()
+  src := provision.Resolve(opts.Template)    // 失敗 → return nil, ErrTemplateNotFound
+                                             // 先於 Inspect:解析失敗不提示、不寫入（§3.7）
   state := provision.Inspect(opts.Workspace)
   switch state:
     TargetNotDir      → return nil, ErrWorkspaceExists
@@ -330,6 +342,8 @@ Create(opts, confirm):
 | remove 目標未註冊                     | 使用者錯 | exit ≠ 0 + `runtime_not_found`;不改動 config.yaml          |
 | remove 寫回 config.yaml 失敗（磁碟 / 權限） | 暫時 | exit ≠ 0 + `internal`;註冊表維持原狀（原子寫入,無半寫）    |
 | create 旗標缺漏 / 不在列舉 / 與 `--source` 不相容 | 使用者錯 | usage 或明確訊息;exit ≠ 0;不寫入                    |
+| create `--template` 解析出的目錄不存在 / 非目錄 | 使用者錯 | `ErrTemplateNotFound`;exit ≠ 0;不寫入、不提示確認;訊息含查找的絕對路徑與其來源 |
+| create `--template` 值為空字串               | 使用者錯 | 旗標驗證錯誤;exit ≠ 0;不寫入（不等同省略,§3.7）           |
 | create 目標存在但非目錄                | 使用者錯 | `ErrWorkspaceExists`;exit ≠ 0;不寫入（`--force` 不繞過）   |
 | create 目標非空、非互動終端且無 `--force` | 使用者錯 | `ErrWorkspaceNotEmpty`;exit ≠ 0;不寫入;訊息提示 `--force` |
 | create 確認被拒                        | 正常     | exit ≠ 0;不寫入（使用者主動中止,非錯誤語意）               |
@@ -362,6 +376,8 @@ Create(opts, confirm):
 | K    | 對 J 產出的 workspace 直接 `gogents start --workspace ./demo` | 通過 config schema 驗證並啟動;config.yaml 此時才出現該 runtime |
 | L    | `runtime create` 指向既有非空目錄（互動終端） | 列出將寫入／覆蓋的路徑並提示;答 `n` → 不寫入、exit ≠ 0;答 `y` → 佈建,目錄內其餘既有檔案不變 |
 | M    | 同 L 但 stdin 非終端（如 `< /dev/null`）      | 不提示、exit ≠ 0、不寫入,訊息提示 `--force`;改帶 `--force` → 直接佈建 |
+| N    | 複製 `templates/base/` 到 `./my-tpl`、刪其 `.mcp.json`,`runtime create demo2 --template ./my-tpl …` | 產出僅含 `./my-tpl` 的內容;`./demo2/.mcp.json` **不存在**（不與內建 template 疊加） |
+| O    | `GOGENTS_TEMPLATES=$PWD/tpls gogents runtime create demo3 --template svc …` | 讀 `$PWD/tpls/svc/` 佈建;同名稱在未設該變數時改讀 `./svc/` |
 
 ### 7.3 錯誤路徑
 
@@ -376,6 +392,8 @@ Create(opts, confirm):
 | `runtime create` 缺 `--repo` / `--source github_issue` 缺 `--instance` | exit ≠ 0;不建立任何目錄                |
 | `runtime create --source local --instance x`（旗標與 source 不相容） | exit ≠ 0 + 明確訊息;不寫入            |
 | `runtime create` 目標為既有一般檔案 | exit ≠ 0;該檔案不被改動（`--force` 亦然）                |
+| `runtime create --template ./nope`（目錄不存在） | exit ≠ 0 + 訊息含查找路徑;**不落回內建 template**、不建立目標目錄 |
+| `runtime create --template svc` 且 `GOGENTS_TEMPLATES` 設定但其下無 `svc/` | exit ≠ 0;不改查當前目錄的 `./svc/`、不落回內建 template |
 
 ### 7.4 通過條件
 
@@ -383,4 +401,5 @@ Create(opts, confirm):
 - `runtime status` 於 daemon 存活時回報 state.yaml 的 `runtime_state`,daemon 不存活時回報 `down`。
 - 三個查詢子指令全程**不修改** config.yaml / state.yaml / task.yaml（可用 mtime 觀察）。
 - `runtime remove` 僅從 config.yaml 移除目標條目,不觸碰 state.yaml / task.yaml / logs;未註冊目標回非零 exit 且 config.yaml 不變。
-- `runtime create` 產出的 workspace 可直接 `start`;`create` 全程不寫 config.yaml、不 clone repo、不刪除目標目錄下任何既有檔案（含失敗路徑）。
+- `runtime create` 以內建 template 產出的 workspace 可直接 `start`;`create` 全程不寫 config.yaml、不 clone repo、不刪除目標目錄下任何既有檔案（含失敗路徑）。
+- `--template` 選出唯一來源樹:落地檔案集恰為該樹內容,不與內建 template 疊加;解析失敗一律非零 exit 且不寫入,不靜默落回內建 template。

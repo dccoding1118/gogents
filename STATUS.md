@@ -19,14 +19,10 @@
 
 - **不新增 `init` 指令**：`config.yaml` 已是 lazy 自動建立（`Load` 缺檔回空 registry + nil，`Upsert` 的 `atomicWrite` 會 `MkdirAll`），`runtime list` 不會 fail。專建 config.yaml 的 init 屬純儀式。環境前置檢查（git / gh / claude 可用性）若要做，另名 `doctor`。
 
-**template**
-
-- 解析順序（CH-008）：`--template` 路徑 → `GOGENTS_TEMPLATES/<name>` → 內建 embed。外部來源為疊在 embed 之上的選用覆寫；embed 為保底來源，只下載 binary 的使用者無外部檔案可指定。
-
 **發佈**
 
 - gogents 自建 GitHub Actions release pipeline（tag → 多平台 binary → GitHub Releases）。am 的 `package.sh` 之後改抓 release 產物，不再從 `~/workspace/gogents` 原始碼建置。
-- release 產物為 **binary + `templates/`**（排除 `*.go`，不含 `embed.go`）。embed 是唯一生效來源；壓縮檔內的 `templates/` 僅供翻閱與複製，需附 `README.md` 說明「改完須經 `--template` / `GOGENTS_TEMPLATES` 指定才生效」，否則使用者會誤以為就地改即生效。不採「執行檔旁 templates/」的執行期搜尋（symlink／只複製 binary 就會斷，且錯誤延到執行期）。
+- release 產物為 **binary + `templates/`**（排除 `*.go`，不含 `embed.go`）。壓縮檔內的 `templates/` 僅供翻閱與複製，需附 `README.md` 說明「就地改不生效，須複製後經 `--template` / `GOGENTS_TEMPLATES` 指定」，否則使用者會誤以為就地改即生效。不採「執行檔旁 templates/」的執行期搜尋（symlink／只複製 binary 就會斷，且錯誤延到執行期）。
 
 **am 收斂**
 
@@ -40,6 +36,5 @@
 
 各項逐一開隔離 session 執行。
 
-- [ ] **CH-008 template 外部化**：僅剩 `--template` / `GOGENTS_TEMPLATES` 解析順序（`templates/base/` 與 `go:embed` 已於 CH-007 落地）。`template eject` 評估後暫不做——release 帶 `templates/` 與 GitHub 網頁已覆蓋取得範本的需求，僅「`go install` 裝且不開網頁」的窄情境有用，待外部化實作時再評估。相依 CH-007。
-- [ ] **CH-009 local source 去 am 化**：`internal/source/local.go` 的 `defaultTicketInbox` 由 `~/.am/tickets` 改為 `<GlobalHome>/tickets`；ticket schema 文件化為 gogents 契約。與 CH-007/008 無相依，可並行。
+- [ ] **CH-009 local source 去 am 化**：`internal/source/local.go` 的 `defaultTicketInbox` 由 `~/.am/tickets` 改為 `<GlobalHome>/tickets`；ticket schema 文件化為 gogents 契約。
 - [ ] **CH-010 公開化收尾**：README／AGENTS／R01–R12 定位重寫（拔除「am 的執行面」定位）；新增 LICENSE（公開 repo 無授權條款等同保留所有權利）；GitHub Actions release pipeline。

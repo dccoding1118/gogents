@@ -30,11 +30,11 @@ Two task sources feed one shared pipeline: `github_issue` (GitHub Issues via `gh
 | D04    | `internal/logger`     | Structured JSONL logger                            |
 | D05    | `internal/source`     | Task sources (`github_issue`, `local`), feedback reporters, content fetchers, dispatcher |
 | D06    | `internal/agent`      | Claude probe & executor adapter                    |
-| D09    | `internal/provision`  | Workspace provisioning from the embedded template (`runtime create`) |
+| D09    | `internal/provision`  | Workspace provisioning from a built-in or user-supplied template (`runtime create`) |
 
 ## Features
 
-- **One-Command Workspace Provisioning** — `gogents runtime create <name>` materializes a ready-to-start workspace (runtime.yaml + agent runtime elements) from a template embedded in the binary, so a downloaded binary needs no external files. It never deletes anything under your directory, and asks before writing into a non-empty one.
+- **One-Command Workspace Provisioning** — `gogents runtime create <name>` materializes a ready-to-start workspace (runtime.yaml + agent runtime elements) from a template embedded in the binary, so a downloaded binary needs no external files. Point `--template` at your own tree to provision a specialty repeatedly. It never deletes anything under your directory, and asks before writing into a non-empty one.
 - **Pluggable Task Sources** — `github_issue` polls GitHub Issues (via `gh` CLI) by label; `local` reads an am ticket inbox (`~/.am/tickets/`), claiming tickets that match the worker label **and** carry `status: queued`. Both share one task store, state machine, and execution pipeline.
 - **Pluggable Agent Architecture** — Agents sit behind a simple probe/executor interface. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the officially supported agent; new agents can be added by implementing the interface.
 - **Automated Execution Pipeline** — For each task: fetches task content → prepares `input.md` → creates a Git branch → invokes the agent (with the **workspace root** as its working directory, so workspace-level `.claude/` and `.mcp.json` apply) → judges the result → reports back to the source.
@@ -90,6 +90,7 @@ bin/gogents runtime create my-workspace \
 | Flag | Required | Default | Notes |
 | --- | --- | --- | --- |
 | `<name>` | yes | — | Runtime name (positional) |
+| `--template` | no | — | Template tree: a path or a name (see [Custom templates](#custom-templates)); omit to use the built-in one |
 | `--workspace` | no | `./<name>` | Workspace root |
 | `--repo` | yes | — | Repo URL |
 | `--branch` | no | `main` | Default branch |
@@ -102,6 +103,45 @@ bin/gogents runtime create my-workspace \
 | `--force` | no | false | Skip the confirmation prompt on a non-empty workspace |
 
 `create` only builds the workspace — it does not register the runtime (that happens on `start`) and does not clone the repo (the daemon does that at startup). Pointing it at a non-empty directory prompts for confirmation, listing exactly what will be written or overwritten; nothing else in the directory is touched, and **no file is ever deleted**, including on failure. Non-interactive shells refuse instead of prompting — pass `--force` to proceed.
+
+### Custom templates
+
+The built-in template is a generic starting point. To turn a specialty — working conventions, skills, a set of MCP servers — into something you can provision repeatedly, copy `templates/base/` (shipped in the release archive and in this repo), edit it, and point `--template` at it:
+
+```bash
+cp -r templates/base ./my-tpl
+$EDITOR ./my-tpl/.claude/CLAUDE.md
+
+bin/gogents runtime create my-worker --template ./my-tpl \
+    --repo https://github.com/<owner>/<repo> \
+    --agent claude --model claude-sonnet-5 --source local
+```
+
+`--template` takes either form; the value **contains a path separator** ⇒ it's a path, otherwise it's a name:
+
+| `--template` | Template tree used |
+| --- | --- |
+| `./my-tpl`, `/opt/tpl`, `a/b` (path) | That directory. `GOGENTS_TEMPLATES` is ignored. |
+| `rust-svc` (name), `GOGENTS_TEMPLATES` set | `$GOGENTS_TEMPLATES/rust-svc/` |
+| `rust-svc` (name), `GOGENTS_TEMPLATES` unset | `./rust-svc/` |
+| omitted | The template built into the binary |
+
+**`GOGENTS_TEMPLATES`** points at a directory holding your templates, one subdirectory per name — mirroring this repo's `templates/` layout, so `cp -r templates/base $GOGENTS_TEMPLATES/rust-svc` just works:
+
+```bash
+export GOGENTS_TEMPLATES=~/gogents-templates   # holds rust-svc/, docs-writer/, …
+bin/gogents runtime create my-worker --template rust-svc --repo … --source local
+```
+
+It is a **base for name lookups, not a search path**: a single directory (not `PATH`-style), and it only applies to the name form. Setting it without passing `--template` still uses the built-in template.
+
+A few properties worth knowing:
+
+- **One tree wins — no layering.** The resolved tree is the whole content; it is never merged with the built-in one. Dropping `.mcp.json` from your copy means the provisioned workspace has no `.mcp.json`.
+- **No fallback on failure.** If `--template` resolves to a directory that doesn't exist, `create` fails and tells you which path it looked at. It won't silently fall back to the built-in template and hand you a workspace that isn't what you asked for.
+- **The directory you point at is the tree root.** Its relative paths are the workspace's relative paths — no extra `templates/` layer inside.
+- **`*.tmpl` files are rendered** through Go's `text/template` (the suffix is dropped); everything else is copied verbatim. Available variables: `.Name`, `.RepoURL`, `.Branch`, `.Agent`, `.Model`, `.Source`, `.Label`, `.Instance`, `.TicketsPath`. Referencing an unknown one is an error, not an empty string.
+- **Your tree's contents aren't validated.** If it renders a `runtime.yaml` that doesn't match the schema — or omits it entirely — you'll find out at `gogents start`, not at `create`.
 
 ### Configuring manually
 
@@ -156,6 +196,8 @@ The daemon will:
 4. Shut down gracefully on `SIGTERM` / `SIGINT`
 
 **Global home (`GOGENTS_HOME`)** — the global registry (`config.yaml`) and daemon logs (`logs/<workspace-hash>/`) live under a single global-home root, resolved as: `$GOGENTS_HOME` if set, else `$HOME/.gogents` (default). Set `GOGENTS_HOME` to keep independent registries/logs on one machine (e.g. dev vs prod), mirroring agent-manager's `AM_HOME`. The per-workspace `.gogents/` (runtime.yaml / state.yaml / tasks/) is unaffected.
+
+`GOGENTS_HOME` and [`GOGENTS_TEMPLATES`](#custom-templates) are independent: the global home is a state directory for the registry and logs, and is never used as a template location.
 
 ### Observability
 
