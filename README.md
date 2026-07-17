@@ -46,10 +46,41 @@ Two task sources feed one shared pipeline: `github_issue` (GitHub Issues via `gh
 
 ## Prerequisites
 
-- **Go** 1.23+
-- **[mise](https://mise.jdx.dev/)** — Task runner & toolchain manager
+To run gogents:
+
+- **[git](https://git-scm.com/)**
 - **[gh](https://cli.github.com/)** — GitHub CLI (authenticated via `gh auth login`)
 - **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** (`claude`) — the coding agent CLI
+
+To build it from source, additionally:
+
+- **Go** 1.23+
+- **[mise](https://mise.jdx.dev/)** — Task runner & toolchain manager
+
+## Install
+
+### From a release
+
+Download the archive for your platform from [Releases](https://github.com/dccoding1118/gogents/releases) and put the binary on your `PATH`:
+
+```bash
+VERSION=v0.1.0
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # linux | darwin
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+
+curl -fsSL -o gogents.tar.gz \
+    "https://github.com/dccoding1118/gogents/releases/download/${VERSION}/gogents_${VERSION}_${OS}_${ARCH}.tar.gz"
+tar -xzf gogents.tar.gz
+sudo install gogents_${VERSION}_${OS}_${ARCH}/gogents /usr/local/bin/
+```
+
+Archives are published for **linux** and **macOS** on `amd64` and `arm64`; verify a download against the release's `checksums.txt` if you like. Windows is not supported — the daemon's process-liveness probe relies on POSIX signals.
+
+The binary is self-contained: the workspace template is compiled into it, so `runtime create` works with nothing else installed. Each archive also carries a plain copy of `templates/` for reading and copying (see [Custom templates](#custom-templates)) and the `LICENSE`.
+
+### From source
+
+See [Quick Start](#quick-start) below — clone, `mise install`, `mise run build`.
 
 ## Quick Start
 
@@ -260,4 +291,4 @@ docs/
 
 ## License
 
-This project is currently unlicensed. All rights reserved.
+[MIT](LICENSE)
