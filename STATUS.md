@@ -19,10 +19,6 @@
 
 - **不新增 `init` 指令**：`config.yaml` 已是 lazy 自動建立（`Load` 缺檔回空 registry + nil，`Upsert` 的 `atomicWrite` 會 `MkdirAll`），`runtime list` 不會 fail。專建 config.yaml 的 init 屬純儀式。環境前置檢查（git / gh / claude 可用性）若要做，另名 `doctor`。
 
-**template**
-
-- 解析順序（CH-008）：`--template` 路徑 → `GOGENTS_TEMPLATES/<name>` → 內建 embed。外部來源為疊在 embed 之上的選用覆寫；embed 為保底來源，只下載 binary 的使用者無外部檔案可指定。
-
 **發佈**
 
 - gogents 自建 GitHub Actions release pipeline（tag → 多平台 binary → GitHub Releases）。am 的 `package.sh` 之後改抓 release 產物，不再從 `~/workspace/gogents` 原始碼建置。
@@ -40,6 +36,6 @@
 
 各項逐一開隔離 session 執行。
 
-- [ ] **CH-008 template 外部化**：僅剩 `--template` / `GOGENTS_TEMPLATES` 解析順序（`templates/base/` 與 `go:embed` 已於 CH-007 落地）。`template eject` 評估後暫不做——release 帶 `templates/` 與 GitHub 網頁已覆蓋取得範本的需求，僅「`go install` 裝且不開網頁」的窄情境有用，待外部化實作時再評估。相依 CH-007。
+- [ ] **CH-008 template 外部化**：文件與程式皆已完成（變更單 `docs/changes/change-external-templates.md`；`provision.Resolve`／`ErrTemplateNotFound`／非一般檔案檢查、`--template` 旗標）。全測試與 lint 通過、CLI 已端到端驗證各解析分支與失敗路徑。**待上版開 PR**（`/ship`）。`template eject` 評估後不做（理由見變更單 §2）。
 - [ ] **CH-009 local source 去 am 化**：`internal/source/local.go` 的 `defaultTicketInbox` 由 `~/.am/tickets` 改為 `<GlobalHome>/tickets`；ticket schema 文件化為 gogents 契約。與 CH-007/008 無相依，可並行。
 - [ ] **CH-010 公開化收尾**：README／AGENTS／R01–R12 定位重寫（拔除「am 的執行面」定位）；新增 LICENSE（公開 repo 無授權條款等同保留所有權利）；GitHub Actions release pipeline。

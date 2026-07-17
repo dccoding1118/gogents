@@ -21,6 +21,7 @@ var ErrWorkspaceNotEmpty = errors.New("workspace is not empty")
 // CreateOpts is `gogents runtime create` after flag parsing (D08 §3.5).
 type CreateOpts struct {
 	Name        string
+	Template    string
 	Workspace   string
 	RepoURL     string
 	Branch      string
@@ -99,7 +100,14 @@ func Create(opts CreateOpts, confirm func(entries []provision.Entry) bool) (writ
 		return nil, vErr
 	}
 
-	src := provision.Builtin()
+	// Resolve before inspecting the target: an unresolvable template must fail
+	// before anything is written and before we ask the user to confirm an
+	// overwrite that was never going to happen.
+	src, tErr := provision.Resolve(opts.Template)
+	if tErr != nil {
+		return nil, tErr
+	}
+
 	state, sErr := provision.Inspect(opts.Workspace)
 	if sErr != nil {
 		return nil, sErr
@@ -146,6 +154,7 @@ func runCreate(args []string) int {
 	o.Name = args[0]
 
 	fs := flag.NewFlagSet("runtime create", flag.ContinueOnError)
+	fs.StringVar(&o.Template, "template", "", "template tree: path or name (default: the built-in template)")
 	fs.StringVar(&o.Workspace, "workspace", "", "workspace root directory (default ./<name>)")
 	fs.StringVar(&o.RepoURL, "repo", "", "repository URL (required)")
 	fs.StringVar(&o.Branch, "branch", "", "default branch (default main)")
@@ -157,6 +166,15 @@ func runCreate(args []string) int {
 	fs.StringVar(&o.TicketsPath, "tickets-dir", "", "ticket inbox dir (--source local only)")
 	fs.BoolVar(&o.Force, "force", false, "skip the confirmation prompt on a non-empty workspace")
 	if err := fs.Parse(args[1:]); err != nil {
+		return 1
+	}
+
+	// An empty --template means "built-in" to provision, which is what omitting
+	// the flag already says. `--template=` is a mistake, not a way to ask for the
+	// default, and only this layer can tell the two apart.
+	if templateGivenEmpty(fs) {
+		fmt.Fprintln(os.Stderr, "error: --template needs a path or a name; omit it to use the built-in template")
+		printCreateUsage()
 		return 1
 	}
 
@@ -191,6 +209,19 @@ func runCreate(args []string) int {
 	}
 	fmt.Printf("\nnext: gogents start --workspace %s\n", o.Workspace)
 	return 0
+}
+
+// templateGivenEmpty reports whether --template was passed with an empty value.
+// Visit only walks flags that were actually set, which is what separates
+// `--template=` from an omitted flag — both leave the string empty.
+func templateGivenEmpty(fs *flag.FlagSet) bool {
+	given := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "template" && f.Value.String() == "" {
+			given = true
+		}
+	})
+	return given
 }
 
 // interactiveConfirm lists what would land and asks before writing into a
@@ -231,6 +262,6 @@ func stdinIsTerminal() bool {
 
 func printCreateUsage() {
 	fmt.Fprintln(os.Stderr, "usage: gogents runtime create <name> --repo <url> --agent <type> --model <model> --source <local|github_issue>")
-	fmt.Fprintln(os.Stderr, "                               [--workspace <path>] [--branch <branch>] [--label <label>]")
-	fmt.Fprintln(os.Stderr, "                               [--instance <owner/repo>] [--tickets-dir <path>] [--force]")
+	fmt.Fprintln(os.Stderr, "                               [--template <path|name>] [--workspace <path>] [--branch <branch>]")
+	fmt.Fprintln(os.Stderr, "                               [--label <label>] [--instance <owner/repo>] [--tickets-dir <path>] [--force]")
 }

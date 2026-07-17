@@ -8,7 +8,7 @@
 2. **Execute**: 根據任務定義，呼叫 LLM Agent (Claude Code) 在本地工作區執行任務 (agent 工作目錄為 workspace 根，使 workspace 級 `.claude/`、`.mcp.json` 生效)。
 3. **Verify & Report**: 執行完成後，依 ticket 宣告的 `verify` (或 fallback `result.json`) 判定成敗，將結果與日誌回傳至來源 (GitHub 留言 / 回寫 ticket 檔)。
 
-workspace 由 `gogents runtime create <name>` 依內建 template 佈建（`.gogents/runtime.yaml` 與 `.claude/`、`.mcp.json` 等 agent runtime 元素），產出後即可 `gogents start`。
+workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/runtime.yaml` 與 `.claude/`、`.mcp.json` 等 agent runtime 元素），產出後即可 `gogents start`。template 來源預設為內建（embed），可經 `--template <path|name>` 與 `GOGENTS_TEMPLATES` 指定外部樹。
 
 作為 agent-manager (am) 的執行面：am 派工到 `~/.am/tickets/`，gogents worker daemon 依 label 認領執行、回寫終態；am 經 `gogents runtime status` / `gogents logs` 查詢執行狀態 (單向 `am → gogents`)。
 
@@ -17,7 +17,7 @@ workspace 由 `gogents runtime create <name>` 依內建 template 佈建（`.goge
 ### 核心入口
 - `cmd/gogents/`: 應用程式進入點 (main.go)，薄進入點，呼叫 `internal/cli` 的 `Dispatch`。
 - `internal/cli/`: 命令層 (`start`、`runtime create`、`runtime list`、`runtime status`、`runtime remove`、`logs`)；`start` 的組裝亦在此。
-- `templates/base/`: 內建 workspace template，以 `go:embed` 打包進 binary；repo 內保留原始檔供複製修改。
+- `templates/base/`: 內建 workspace template，以 `go:embed` 打包進 binary；repo 內保留原始檔供複製修改。`templates/` 是收納目錄、`base/` 才是樹根（embed 亦 `fs.Sub` 到 `base/`），外部樹同構——`$GOGENTS_TEMPLATES` 對應收納目錄那層。
 - `bin/`: 編譯後的執行檔輸出目錄。
 - `logs/`: 測試報告、覆蓋率與執行日誌輸出目錄。
 
@@ -39,7 +39,7 @@ workspace 由 `gogents runtime create <name>` 依內建 template 佈建（`.goge
 - `internal/execution/`: 任務執行引擎。
     - `runner.go`: 控制任務執行的具體流程 (Prepare -> Run -> Verify -> Judge)；agent 工作目錄為 workspace 根。
     - `judge.go`: 判別執行結果是否成功 (ticket `verify` 指令 exit code，或 fallback `result.json`)。
-- `internal/provision/`: workspace 佈建 (`runtime create` 的 materialize)。
+- `internal/provision/`: workspace 佈建 (`runtime create` 的 template 來源解析與 materialize)。`Resolve` 是唯一的來源決策點；其後的 `Plan` / `Materialize` 對來源是內建或外部一律無感。
     - 走訪 template 樹：`.tmpl` 經 `text/template` 展開並去後綴，其餘原樣複製；來源相對路徑即 workspace 相對路徑。
     - `Inspect` / `Plan` 供命令層判定目標狀態與列出將寫入／覆蓋的檔案；互動確認留在 `internal/cli`。
     - **不刪除任何檔案**（含失敗路徑）；失敗時回傳已落地檔案清單供呼叫端列出。
@@ -70,7 +70,7 @@ workspace 由 `gogents runtime create <name>` 依內建 template 佈建（`.goge
 如果你是一個正在此專案中工作的 Agent，請參考以下定位點：
 
 - **我要新增一個 CLI 指令**: 修改 `internal/cli/cli.go` 的 `Dispatch`（`cmd/gogents/main.go` 只是薄進入點）。
-- **我要調整 workspace 佈建或 template 內容**: template 檔案改 `templates/base/`（新增檔案無需改程式）；materialize 規則見 `internal/provision/`；旗標與確認流程見 `internal/cli/`。
+- **我要調整 workspace 佈建或 template 內容**: template 檔案改 `templates/base/`（新增檔案無需改程式）；materialize 規則與 `--template` / `GOGENTS_TEMPLATES` 的來源解析見 `internal/provision/`；旗標與確認流程見 `internal/cli/`。
 - **我要調整配置參數**: 修改 `internal/foundation/config.go`。
 - **我要修改 Agent 的 Prompt 或行為**: 修改 `internal/agent/` 下對應的檔案。
 - **我要改變任務狀態的處理方式**: 修改 `internal/foundation/task_store.go`。
