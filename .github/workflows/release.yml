@@ -14,9 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Built on a patched toolchain so shipped binaries carry a current
+      # standard library; go.mod's 1.23 directive (EOL) would embed known stdlib
+      # vulnerabilities. Building 1.23-directive code on a newer toolchain is the
+      # safe direction of Go's compatibility promise.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: "1.25"
 
       - name: Test
         run: go test ./...
