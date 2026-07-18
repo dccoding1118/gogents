@@ -60,7 +60,7 @@ state.yaml 採用原子寫入(寫入臨時檔後 rename),避免 daemon 崩潰導
 
 ## runtime_state 顯式狀態
 
-`runtime_state` 是 daemon 的顯式執行階段,供觀測 CLI(R12)與 am 直接讀取,免於由 `current_task` + `sync` 欄位間接推導。daemon 於各階段主動更新:
+`runtime_state` 是 daemon 的顯式執行階段,供觀測 CLI(R12)與外部消費者直接讀取,免於由 `current_task` + `sync` 欄位間接推導。daemon 於各階段主動更新:
 
 | 值           | 語義                                             | 進入時機                          |
 | ------------ | ------------------------------------------------ | --------------------------------- |
@@ -74,7 +74,7 @@ state.yaml 採用原子寫入(寫入臨時檔後 rename),避免 daemon 崩潰導
 - `runtime_state` 與 task 的 `status`(R03)不同層級:前者描述 **daemon 當下在做什麼**,後者描述 **單一任務的命運**
 - **`down` 不落檔**:daemon 行程不存在時的狀態由查詢端(R12 `runtime status`)依 pid 不存在推得,不寫入 state.yaml(死掉的 daemon 無法自己寫)
 - 更新採 state.yaml 原子寫入
-- **命名**:gogents 的執行單位是 **runtime**(daemon＋workspace),故欄位為 `runtime_state`。am 在其分層稱同一實體為 **worker**(am §2.1 worker↔runtime 對應);am 透過 `gogents runtime status` 查得後於自身層對應為 worker 狀態
+- **命名**:gogents 的執行單位是 **runtime**(daemon＋workspace),故欄位為 `runtime_state`。消費者可經 `gogents runtime status` 查得後,於自身分層對應到其術語(例如 agent-manager 將同一實體稱為 **worker**)
 
 ## 主迴圈
 

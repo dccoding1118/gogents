@@ -4,7 +4,7 @@
 
 ## 目的
 
-定義 gogents 的 runtime 註冊(`start` 寫入 `~/.gogents/config.yaml`)與觀測 CLI(`gogents runtime list`、`gogents runtime status`、`gogents logs`),使 agent-manager (am) 及使用者能列出已註冊 runtime、查詢單一 runtime 的即時執行狀態、匯出日誌供稽核。am 不維護執行狀態副本,一律經此介面向 gogents 查詢(單向 `am → gogents`)。
+定義 gogents 的 runtime 註冊(`start` 寫入 `~/.gogents/config.yaml`)與觀測 CLI(`gogents runtime list`、`gogents runtime status`、`gogents logs`),使使用者與外部消費者能列出已註冊 runtime、查詢單一 runtime 的即時執行狀態、匯出日誌供稽核。消費者不維護執行狀態副本,一律經此介面向 gogents 查詢(單向 `consumer → gogents`);agent-manager (am) 為此類消費者的其中一種。
 
 ## Runtime 註冊
 
@@ -45,13 +45,13 @@ runtime 的執行狀態由兩部分構成:
 
 - 參數同 `runtime status`
 - 輸出該 runtime 的 `~/.gogents/logs/<hash>/` 日誌(`daemon.jsonl` / `error.jsonl`)
-- 供 am 稽核匯出併入(`am audit export` 經此取執行明細)
+- 供外部消費者稽核匯出併入(例如 am 的 `am audit export` 經此取執行明細)
 
 ## Runtime 反註冊(`runtime remove`)
 
 ### `gogents runtime remove <workspace|name>`
 
-- 從 config.yaml 的 `runtimes[]` 移除指定 runtime,供 am 以正式介面清除退役／測試 runtime,取代直接手改 config.yaml
+- 從 config.yaml 的 `runtimes[]` 移除指定 runtime,供外部消費者以正式介面清除退役／測試 runtime,取代直接手改 config.yaml
 - 參數接受 workspace 路徑或 runtime name;比對規則同 `runtime status`(workspace 路徑優先,以 name 指定且多筆時以最近註冊者為準)
 - 命中即移除該筆並原子寫回 config.yaml(write-tmp → fsync → rename,同註冊寫入風格);其餘 runtime 條目不受影響
 - **只動註冊表**:不觸碰該 runtime 的 `logs/`、workspace 內 `.gogents/`,亦不嘗試停止其 daemon(反註冊 ≠ 停機)
@@ -59,7 +59,7 @@ runtime 的執行狀態由兩部分構成:
 
 ## `--json` 結構化輸出
 
-`runtime list` 與 `runtime status` 各提供 opt-in 的 `--json` 布林旗標,對 am 轉接器提供**穩定的資料契約**,使其毋須逐行解析人類可讀顯示層(欄位增減、順序或時間格式變動不致無聲破壞解析)。`logs` 不含 `--json`(維持 JSONL 直通)。
+`runtime list` 與 `runtime status` 各提供 opt-in 的 `--json` 布林旗標,對消費者的轉接器提供**穩定的資料契約**,使其毋須逐行解析人類可讀顯示層(欄位增減、順序或時間格式變動不致無聲破壞解析)。`logs` 不含 `--json`(維持 JSONL 直通)。
 
 - `runtime list --json`:stdout 輸出 runtime 陣列 JSON、exit 0;無註冊時輸出 `[]`(非文字 `(no registered runtimes)`)
 - `runtime status <target> --json`:stdout 輸出單一 runtime 狀態 JSON 物件、exit 0
@@ -71,7 +71,7 @@ JSON 契約的完整欄位對映與型別見 [D08 §3.4](../../designs/D08-runti
 
 ## 不變量
 
-- config.yaml 為 runtime 註冊表(非執行必要);由 `start` upsert 寫入、`runtime remove` 移除,兩者為唯二的正式寫入路徑(am 不再手改檔案);觀測 CLI 與 am 僅以其定位 runtime,不以其選擇啟動目標
+- config.yaml 為 runtime 註冊表(非執行必要);由 `start` upsert 寫入、`runtime remove` 移除,兩者為唯二的正式寫入路徑(消費者不手改檔案);觀測 CLI 與消費者僅以其定位 runtime,不以其選擇啟動目標
 - `runtime list` / `runtime status` / `logs` 為唯讀查詢,不改變 daemon 執行行為、不寫任何檔案;`runtime remove` 僅寫 config.yaml 註冊表,不影響任何 daemon 執行
 
 ## 相關需求
@@ -79,4 +79,4 @@ JSON 契約的完整欄位對映與型別見 [D08 §3.4](../../designs/D08-runti
 - R02 - Runtime 設定檔(config.yaml 註冊表結構與寫入規則)
 - R04 - Daemon 生命週期(啟動註冊步驟、state.yaml 的 `runtime_state` / `pid`)
 - R09 - 日誌規範(`logs` 輸出的日誌來源)
-- R11 - 本地任務源(am 為主要消費者;經此查 worker 執行狀態)
+- R11 - 本地任務源(producer 依此查 runtime 執行狀態;am 為其中一種)

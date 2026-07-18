@@ -4,9 +4,9 @@
 
 公開化計畫（2026-07-16 定案）尚未落 `docs/` 的決策；各項於對應變更單落檔後從此處刪除。
 
-**定位**（落點：CH-012）
+**README badges**（gated on public）
 
-- gogents 是**個人／本機 agent 的專業運作環境工具**，可獨立運作、不依賴 am。am 從「控制面／Tower」降格為 local source 的其中一種 ticket producer。
+- CI status／Go Report Card／latest release／pkg.go.dev 皆為 dynamic endpoint，private repo 下對匿名訪客渲染為 broken／unknown（shields.io・pkg.go.dev 無法讀私有 repo），故一律留到轉 public 當天連同 About 一併加；純靜態 license badge 在私有階段也無單獨加的意義。
 
 **module path**
 
@@ -33,7 +33,7 @@
 
 各項逐一開隔離 session 執行。
 
-- [ ] **CH-012 公開化定位重寫**（README／AGENTS 已於 branch `docs/ch012-neutral-positioning` 併案改完，含 dogfood 文件標準；並新增 `install.sh` 一鍵安裝腳本＋README「From a release」改一行式，手動步驟收進 `<details>` fallback；待開 PR 上版）：剩 `requirement.md`／R01, R02, R04, R07, R11, R12／D01, D07, D08 拔除「gogents 是 am 的執行面」定位，改為 producer 中立敘述（am 續留為 producer 與 `--json` 消費者的實例）。程式碼註解同步：`internal/foundation/config.go`、`internal/foundation/home.go`、`internal/cli/query.go`、`internal/source/local_test.go`。不動需求／設計規格、不影響程式邏輯，故不開變更單。
+- [ ] **首版 release `v0.1.0`**（gogents 現無任何 tag／release；2026-07-18 定版號 `v0.1.0`——semver v0.x 表 API 尚未穩定承諾，日後穩定再打 v1.0.0）：**併入「轉 public」批次一起發**——轉 public 當天從 main 打 tag `v0.1.0` 觸發 `release.yml`（cross-compile linux/darwin×amd64/arm64、checksums、auto notes），使 `install.sh` 一鍵安裝與 badges／Go Report Card 同步對外生效。故本輪不先打 tag。
 - [ ] **公開化時的 GitHub 安全設定**（gated on 轉 public；repo 現為 private+免費方案）：main 分支保護 + required status checks、secret scanning + push protection、CodeQL code scanning——三者在 private+免費全被擋（分支保護需 Pro／public；secret scanning・CodeQL 需 public 才免費，否則要付費 GHAS）。故一律留到 CH-012 轉 public 當下比照辦理；完整清單見 wiki-capture `github-go-public-security-checklist`。**已於 private 先開**：Dependabot alerts + automated security fixes（免費、private 可用）。codeql.yml 因此**先不進 repo**，轉 public 當天再加（內容備於 checklist）。
 - [ ] **dc-dev-workflow skill 建置**：dogfood 修正後 → `wiki-capture` → 於 `dc-llm-wiki` 開發目錄建 skill、上版部署。取代原「把重複步驟抽成全域 skill」的暫緩項。
 - [ ] **（跨 repo，另排）am／mlp LICENSE 對齊**：am 補 `LICENSE`（現 README 明寫 all rights reserved，擋 fork）；mlp 補 `LICENSE` 檔＋README License 章。推廣文件標準時一併。

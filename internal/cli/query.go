@@ -22,7 +22,7 @@ import (
 var ErrStateNotFound = errors.New("state.yaml not found")
 
 // RuntimeView is one row of `runtime list`. The json tags are the stable
-// machine-readable contract consumed by the am adapter (D08 §3.4).
+// machine-readable contract consumed by external adapters (D08 §3.4).
 type RuntimeView struct {
 	Name         string `json:"name"`
 	Workspace    string `json:"workspace"`

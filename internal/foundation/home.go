@@ -11,7 +11,7 @@ import (
 // drifting apart when the root is overridden. Resolution order:
 //
 //  1. $GOGENTS_HOME if non-empty (lets dev/prod hold independent registries and
-//     logs on one machine, mirroring agent-manager's AM_HOME);
+//     logs on one machine);
 //  2. else $HOME/.gogents (default, backward compatible);
 //  3. else /tmp/.gogents (when $HOME is unresolvable).
 //
