@@ -4,8 +4,30 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Minor/patch bumps arrive as one batched PR; majors stay individual for review.
+    groups:
+      go-modules:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Hold go.mod's 1.23 language directive: newer golang.org/x/term requires
+      # go >= 1.24, which bumps the directive and breaks older Go analysis
+      # tooling (golangci-lint / gopls). Patch updates still flow. Revisit if the
+      # repo moves to 1.25.
+      - dependency-name: golang.org/x/term
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    # All action bumps batched into one PR.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
