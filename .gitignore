@@ -8,8 +8,10 @@ logs/
 # Local development workspace
 .local-dev/
 
-# Claude Code settings
+# Claude Code settings (the repo's own). The workspace template payload under
+# templates/base/.claude/ is part of the product and is deliberately tracked.
 .claude/
+!templates/base/.claude/
 
 # Gemini / Antigravity agent data
 .gemini/
