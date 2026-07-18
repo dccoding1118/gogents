@@ -35,6 +35,6 @@
 
 - [ ] **CH-012 公開化定位重寫**：README／AGENTS／requirement.md／R01, R02, R04, R07, R11, R12／D01, D07, D08 拔除「gogents 是 am 的執行面」定位，改為 producer 中立敘述（am 續留為 producer 與 `--json` 消費者的實例）。程式碼註解同步：`internal/foundation/config.go`、`internal/foundation/home.go`、`internal/cli/query.go`、`internal/source/local_test.go`。不動需求／設計規格、不影響程式邏輯，故不開變更單。
 - [ ] **gogents dogfood 文件標準**：README 移出開發面章節（Project Structure／Development／測試 → AGENTS）、how-it-works 改編號步驟；AGENTS 補齊缺章（維護索引已有，補 e2e／部署）；`docs/` 命名對齊複數（`designs`／`tests`／`requirements`）。與 CH-012 同觸 README／AGENTS，**兩者併一次改**避免重寫兩遍。
-- [ ] **GitHub repo 安全設定啟用**（純 Settings、需 admin，非碼）：main 分支保護 + required status checks（讓 ci／codeql 從參考變合併前必過的閘門）、secret scanning + push protection、Dependabot alerts。CodeQL 已走 committed workflow（advanced setup），無需在 Security 分頁另開。
+- [ ] **公開化時的 GitHub 安全設定**（gated on 轉 public；repo 現為 private+免費方案）：main 分支保護 + required status checks、secret scanning + push protection、CodeQL code scanning——三者在 private+免費全被擋（分支保護需 Pro／public；secret scanning・CodeQL 需 public 才免費，否則要付費 GHAS）。故一律留到 CH-012 轉 public 當下比照辦理；完整清單見 wiki-capture `github-go-public-security-checklist`。**已於 private 先開**：Dependabot alerts + automated security fixes（免費、private 可用）。codeql.yml 因此**先不進 repo**，轉 public 當天再加（內容備於 checklist）。
 - [ ] **dc-dev-workflow skill 建置**：dogfood 修正後 → `wiki-capture` → 於 `dc-llm-wiki` 開發目錄建 skill、上版部署。取代原「把重複步驟抽成全域 skill」的暫緩項。
 - [ ] **（跨 repo，另排）am／mlp LICENSE 對齊**：am 補 `LICENSE`（現 README 明寫 all rights reserved，擋 fork）；mlp 補 `LICENSE` 檔＋README License 章。推廣文件標準時一併。
