@@ -1,50 +1,55 @@
 # GoGents
 
-**GoGents** is an automation daemon written in Go that bridges external task sources (GitHub Issues, or a local ticket inbox from [agent-manager](#agent-manager-integration)) with LLM-powered coding agents (Claude Code). It continuously syncs assigned tasks, dispatches them to an AI agent for execution, and reports results back to the originating source.
+**GoGents** is an automation daemon, written in Go, that works a queue of coding tasks unattended. It continuously pulls assigned tasks from a configured source, runs an LLM coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code)) against them inside a prepared workspace, verifies the outcome, and reports back to wherever the task came from.
 
-## Architecture
+It runs standalone on your own machine: point it at a Git repository and a task source, start the daemon, and it syncs → executes → verifies → reports on a loop until you stop it.
+
+## Why GoGents
+
+- **Unattended throughput** — a long-running daemon drains a task queue on its own: it branches, runs the agent, judges the result, and reports back without a human in the loop.
+- **Bring your own workflow** — a workspace carries its own conventions, skills, and MCP servers (`.claude/`, `.mcp.json`). Capture a specialty once as a template and provision it repeatedly.
+- **Two sources, one pipeline** — feed it from GitHub Issues or from a local ticket inbox that any tool can write to; both share the same task store, state machine, and execution flow.
+- **Auditable by design** — a global registry tracks every runtime, and structured JSONL logs record every event, so you can inspect live state and reconstruct history after the fact.
+
+## How It Works
+
+For each task, the daemon runs a fixed cycle:
+
+1. **Sync** — polls the configured source and claims tasks that match its filter into a shared task store.
+2. **Prepare** — fetches the task's content, writes it to `input.md`, and cuts a fresh Git branch.
+3. **Execute** — invokes the agent with the **workspace root** as its working directory, so workspace-level `.claude/` and `.mcp.json` apply.
+4. **Verify** — runs the task's declared `verify` command (or falls back to the agent's `result.json` verdict) to judge pass or fail.
+5. **Report** — writes the outcome back to the originating source — a GitHub comment, PR link, and `gogents:*` label, or the ticket file's terminal `status` and `result`.
+6. **Repeat** on the sync interval, and shut down gracefully on `SIGTERM` / `SIGINT`.
 
 ```
-┌──────────────────┐
-│  GitHub Issues   │──┐
-└──────────────────┘  │
-                      │   ┌──────────┐     ┌──────────────┐     ┌───────────┐
-                      ├──▶│  Syncer  │────▶│  Task Store  │────▶│  Runner   │
-                      │   │  (D02)   │     │  (D01)       │     │  (D03)    │
-┌──────────────────┐  │   └──────────┘     └──────────────┘     └─────┬─────┘
-│  Local Tickets   │──┘                                               │
-│ (ticket inbox)   │                                           ┌──────▼──────┐
-└──────────────────┘                                           │  Agent CLI  │
-         ▲                                                     │   claude    │
-         │                                                     └──────┬──────┘
-         └───────────────── feedback (results) ────────────────────┘
+ source ──▶ sync ──▶ task store ──▶ run agent ──▶ verify ──▶ report ──┐
+    ▲                                                                 │
+    └─────────────────────────── feedback ────────────────────────────┘
 ```
 
-Two task sources feed one shared pipeline: `github_issue` (GitHub Issues via `gh`) and `local` (a ticket inbox on disk, `<GOGENTS_HOME>/tickets/` by default). Results are reported back to the originating source.
+## Task Sources
 
-| Module | Package               | Description                                        |
-| ------ | --------------------- | -------------------------------------------------- |
-| D01    | `internal/foundation` | Config, workspace paths, task store, state machine |
-| D02    | `internal/daemon`     | Daemon lifecycle, sync loop, state persistence     |
-| D03    | `internal/execution`  | Task runner, result judge, input builder           |
-| D04    | `internal/logger`     | Structured JSONL logger                            |
-| D05    | `internal/source`     | Task sources (`github_issue`, `local`), feedback reporters, content fetchers, dispatcher |
-| D06    | `internal/agent`      | Claude probe & executor adapter                    |
-| D09    | `internal/provision`  | Workspace provisioning from a built-in or user-supplied template (`runtime create`) |
+Two source types feed the one pipeline; a runtime picks one via `source.type`.
+
+- **`github_issue`** — polls GitHub Issues (via the `gh` CLI) by label. Feedback goes back as issue comments, PR links, and `gogents:*` labels.
+- **`local`** — reads a ticket inbox on disk (`<GOGENTS_HOME>/tickets/` by default), claiming tickets that match the worker label **and** carry `status: queued`. On completion it writes the terminal `status` and `result` back to the ticket file.
+
+Any tool that writes the ticket format is a **producer** — GoGents does not care which one. [agent-manager](https://github.com/dccoding1118/agent-manager) is one such producer: it queues tickets into an inbox, points a worker's `source.path` at it, and later reads live execution state via `gogents runtime status` / `gogents logs` (see [Managing Runtimes](#managing-runtimes)).
 
 ## Features
 
 - **One-Command Workspace Provisioning** — `gogents runtime create <name>` materializes a ready-to-start workspace (runtime.yaml + agent runtime elements) from a template embedded in the binary, so a downloaded binary needs no external files. Point `--template` at your own tree to provision a specialty repeatedly. It never deletes anything under your directory, and asks before writing into a non-empty one.
-- **Pluggable Task Sources** — `github_issue` polls GitHub Issues (via `gh` CLI) by label; `local` reads a ticket inbox on disk (`<GOGENTS_HOME>/tickets/` by default), claiming tickets that match the worker label **and** carry `status: queued`. Any tool that writes the ticket format can feed it. Both share one task store, state machine, and execution pipeline.
-- **Pluggable Agent Architecture** — Agents sit behind a simple probe/executor interface. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the officially supported agent; new agents can be added by implementing the interface.
-- **Automated Execution Pipeline** — For each task: fetches task content → prepares `input.md` → creates a Git branch → invokes the agent (with the **workspace root** as its working directory, so workspace-level `.claude/` and `.mcp.json` apply) → judges the result → reports back to the source.
-- **Ticket-Declared Verification** — A `local` ticket may declare a `verify` command; the daemon runs it in the workspace and uses its exit code to judge pass/fail, falling back to the `result.json` coding verdict when unspecified.
-- **Graceful Lifecycle Management** — Signal-aware daemon with startup validation (preflight checks), crash recovery (requeues interrupted tasks), and graceful shutdown.
+- **Pluggable Task Sources** — `github_issue` and `local` share one task store, state machine, and execution pipeline; a runtime selects one via `source.type` (see [Task Sources](#task-sources)).
+- **Pluggable Agent Architecture** — agents sit behind a simple probe/executor interface. [Claude Code](https://docs.anthropic.com/en/docs/claude-code) is the officially supported agent; new agents can be added by implementing the interface.
+- **Ticket-Declared Verification** — a `local` ticket may declare a `verify` command; the daemon runs it in the workspace and uses its exit code to judge pass/fail, falling back to the `result.json` coding verdict when unspecified.
+- **Graceful Lifecycle Management** — a signal-aware daemon with startup validation (preflight checks), crash recovery (requeues interrupted tasks), and graceful shutdown.
 - **Structured Logging** — JSONL-formatted logs with Asia/Taipei timezone, split into `daemon.jsonl` (all events) and `error.jsonl` (errors only).
-- **Runtime Registration & Observability** — `start` registers the runtime into `~/.gogents/config.yaml` (keyed by workspace path); `gogents runtime list/status` and `gogents logs` expose live `runtime_state`, PID, and logs for auditing.
-- **Source Feedback** — `github_issue` updates issue comments, PR links, and `gogents:*` labels; `local` writes the terminal `status` and `result` back to the ticket file.
+- **Runtime Registration & Observability** — `start` registers the runtime into `<GOGENTS_HOME>/config.yaml` (keyed by workspace path); `gogents runtime list/status` and `gogents logs` expose live `runtime_state`, PID, and logs for auditing.
 
 ## Prerequisites
+
+gogents runs on **linux** and **macOS** (`amd64` / `arm64`). Windows is not supported — the daemon's process-liveness probe relies on POSIX signals.
 
 To run gogents:
 
@@ -55,13 +60,27 @@ To run gogents:
 To build it from source, additionally:
 
 - **Go** 1.23+
-- **[mise](https://mise.jdx.dev/)** — Task runner & toolchain manager
+- **[mise](https://mise.jdx.dev/)** — task runner & toolchain manager
 
 ## Install
 
 ### From a release
 
-Download the archive for your platform from [Releases](https://github.com/dccoding1118/gogents/releases) and put the binary on your `PATH`:
+Install the latest release onto your `PATH` with one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dccoding1118/gogents/main/install.sh | sh
+```
+
+The script detects your OS and architecture, downloads the matching archive from [Releases](https://github.com/dccoding1118/gogents/releases), verifies its checksum, and installs the binary to `/usr/local/bin`. Override the destination with `INSTALL_DIR` and pin a version with `VERSION`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dccoding1118/gogents/main/install.sh \
+    | VERSION=v0.1.0 INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+<details>
+<summary>Or download and install manually</summary>
 
 ```bash
 VERSION=v0.1.0
@@ -74,44 +93,36 @@ tar -xzf gogents.tar.gz
 sudo install gogents_${VERSION}_${OS}_${ARCH}/gogents /usr/local/bin/
 ```
 
-Archives are published for **linux** and **macOS** on `amd64` and `arm64`; verify a download against the release's `checksums.txt` if you like. Windows is not supported — the daemon's process-liveness probe relies on POSIX signals.
+</details>
+
+Archives are published for **linux** and **macOS** on `amd64` and `arm64`; the installer verifies the download against the release's `checksums.txt`.
 
 The binary is self-contained: the workspace template is compiled into it, so `runtime create` works with nothing else installed. Each archive also carries a plain copy of `templates/` for reading and copying (see [Custom templates](#custom-templates)) and the `LICENSE`.
 
 ### From source
 
-See [Quick Start](#quick-start) below — clone, `mise install`, `mise run build`.
-
-## Quick Start
-
-### 1. Clone & Install Tools
-
 ```bash
 git clone https://github.com/dccoding1118/gogents.git
 cd gogents
-mise install   # installs Go, golangci-lint, gofumpt
+mise install       # installs Go, golangci-lint, gofumpt
+mise run build     # output: bin/gogents
 ```
 
-### 2. Build
+## Getting Started
 
-```bash
-mise run build
-# Output: bin/gogents
-```
-
-### 3. Create a runtime
+### 1. Create a runtime
 
 `runtime create` provisions a ready-to-start workspace from the built-in template — `.gogents/runtime.yaml` plus the agent runtime elements (`.claude/CLAUDE.md`, `.claude/skills/`, `.mcp.json`):
 
 ```bash
 # Local ticket source
-bin/gogents runtime create my-worker \
+gogents runtime create my-worker \
     --repo https://github.com/<owner>/<repo> \
     --agent claude --model claude-sonnet-5 \
     --source local
 
 # GitHub Issue source
-bin/gogents runtime create my-workspace \
+gogents runtime create my-workspace \
     --repo https://github.com/<owner>/<repo> \
     --agent claude --model claude-sonnet-5 \
     --source github_issue --instance <owner>/<repo> \
@@ -135,6 +146,22 @@ bin/gogents runtime create my-workspace \
 
 `create` only builds the workspace — it does not register the runtime (that happens on `start`) and does not clone the repo (the daemon does that at startup). Pointing it at a non-empty directory prompts for confirmation, listing exactly what will be written or overwritten; nothing else in the directory is touched, and **no file is ever deleted**, including on failure. Non-interactive shells refuse instead of prompting — pass `--force` to proceed.
 
+### 2. Run
+
+```bash
+gogents start --workspace /path/to/workspace
+```
+
+The daemon will:
+1. Validate config & run preflight checks (git, source toolchain, agent CLI)
+2. Initialize the workspace directory structure and register the runtime into the global registry (`<GOGENTS_HOME>/config.yaml`)
+3. Enter the sync loop — poll → execute → verify → report → repeat
+4. Shut down gracefully on `SIGTERM` / `SIGINT`
+
+**Global home (`GOGENTS_HOME`)** — the global registry (`config.yaml`) and daemon logs (`logs/<workspace-hash>/`) live under a single global-home root, resolved as `$GOGENTS_HOME` if set, else `$HOME/.gogents` (default). Set `GOGENTS_HOME` to keep independent registries/logs on one machine (e.g. dev vs prod). The per-workspace `.gogents/` (runtime.yaml / state.yaml / tasks/) is unaffected.
+
+`GOGENTS_HOME` and [`GOGENTS_TEMPLATES`](#custom-templates) are independent: the global home is a state directory for the registry and logs, and is never used as a template location.
+
 ### Custom templates
 
 The built-in template is a generic starting point. To turn a specialty — working conventions, skills, a set of MCP servers — into something you can provision repeatedly, copy `templates/base/` (shipped in the release archive and in this repo), edit it, and point `--template` at it:
@@ -143,7 +170,7 @@ The built-in template is a generic starting point. To turn a specialty — worki
 cp -r templates/base ./my-tpl
 $EDITOR ./my-tpl/.claude/CLAUDE.md
 
-bin/gogents runtime create my-worker --template ./my-tpl \
+gogents runtime create my-worker --template ./my-tpl \
     --repo https://github.com/<owner>/<repo> \
     --agent claude --model claude-sonnet-5 --source local
 ```
@@ -161,7 +188,7 @@ bin/gogents runtime create my-worker --template ./my-tpl \
 
 ```bash
 export GOGENTS_TEMPLATES=~/gogents-templates   # holds rust-svc/, docs-writer/, …
-bin/gogents runtime create my-worker --template rust-svc --repo … --source local
+gogents runtime create my-worker --template rust-svc --repo … --source local
 ```
 
 It is a **base for name lookups, not a search path**: a single directory (not `PATH`-style), and it only applies to the name form. Setting it without passing `--template` still uses the built-in template.
@@ -214,41 +241,25 @@ agent:
   model: "claude-sonnet-5"
 ```
 
-### 4. Run
-
-```bash
-bin/gogents start --workspace /path/to/workspace
-```
-
-The daemon will:
-1. Validate config & run preflight checks (git, source toolchain, agent CLI)
-2. Initialize workspace directory structure and register the runtime into the global registry (`<GOGENTS_HOME>/config.yaml`)
-3. Enter the sync loop — poll → execute → verify → report → repeat
-4. Shut down gracefully on `SIGTERM` / `SIGINT`
-
-**Global home (`GOGENTS_HOME`)** — the global registry (`config.yaml`) and daemon logs (`logs/<workspace-hash>/`) live under a single global-home root, resolved as: `$GOGENTS_HOME` if set, else `$HOME/.gogents` (default). Set `GOGENTS_HOME` to keep independent registries/logs on one machine (e.g. dev vs prod), mirroring agent-manager's `AM_HOME`. The per-workspace `.gogents/` (runtime.yaml / state.yaml / tasks/) is unaffected.
-
-`GOGENTS_HOME` and [`GOGENTS_TEMPLATES`](#custom-templates) are independent: the global home is a state directory for the registry and logs, and is never used as a template location.
-
-### Observability
+## Managing Runtimes
 
 ```bash
 # List all registered runtimes (workspace / name / registered_at)
-bin/gogents runtime list
+gogents runtime list
 
 # Live status of one runtime (runtime_state, PID, current task, last sync);
 # reports "down" if the daemon PID is no longer alive
-bin/gogents runtime status <workspace|name>
+gogents runtime status <workspace|name>
 
 # Print a runtime's logs (daemon.jsonl / error.jsonl)
-bin/gogents logs <workspace|name>
+gogents logs <workspace|name>
 
 # Unregister a retired/test runtime from the global registry (config.yaml only;
 # leaves the runtime's logs and workspace .gogents/ intact, does not stop the daemon)
-bin/gogents runtime remove <workspace|name>
+gogents runtime remove <workspace|name>
 ```
 
-`runtime list` and `runtime status` accept an opt-in `--json` flag for a stable machine-readable contract (used by the am adapter): a runtime array or a single status object on stdout, and a structured `{"error":{"code","message"}}` object on stderr with a non-zero exit on failure. Timestamps are RFC3339; an empty `last_sync_at` is `""`. Without `--json` the text output is unchanged.
+`runtime list` and `runtime status` accept an opt-in `--json` flag for a stable machine-readable contract, consumed by external tooling ([agent-manager](https://github.com/dccoding1118/agent-manager) among them): a runtime array or a single status object on stdout, and a structured `{"error":{"code","message"}}` object on stderr with a non-zero exit on failure. Timestamps are RFC3339; an empty `last_sync_at` is `""`. Without `--json` the text output is unchanged.
 
 ### Version
 
@@ -265,44 +276,9 @@ platform: darwin/arm64
 
 Release binaries carry their tag, commit and build time, injected at build time — quote the output when reporting an issue. A binary built from source instead reports `dev` with the commit it was built from, suffixed `-dirty` if the work tree had uncommitted changes.
 
-## agent-manager Integration
+## Contributing
 
-GoGents is the **execution plane** for [agent-manager](https://github.com/dccoding1118/agent-manager) (am), the local agent control plane (Tower). am produces tickets into its own inbox and points the worker's `source.path` at it; a GoGents worker daemon configured with `source.type: local` claims tickets matching its worker label whose `status` is `queued` (am uses `status` as its dispatch gate — `blocked` and other states are left untouched), executes them, runs the ticket's `verify` command, and writes the terminal `status` and `result` back to the ticket file. Communication is one-way (`am → gogents`): am queries live execution state via `gogents runtime status` / `gogents logs` rather than caching it. See `docs/requirements/reqs/R11-local-source.md` and `R12-runtime-observability.md`.
-
-## Development
-
-```bash
-# Format code
-mise run fmt
-
-# Lint
-mise run lint
-
-# Run all unit tests with coverage
-mise run test
-```
-
-### Project Structure
-
-```
-cmd/gogents/       # CLI entrypoint
-internal/
-  foundation/      # Config, workspace, task store
-  daemon/          # Daemon lifecycle, syncer
-  execution/       # Task runner, judge
-  logger/          # Structured JSONL logger
-  source/          # Task source adapters (github_issue, local) + dispatcher
-  agent/           # LLM agent adapters
-  gitops/          # Git operations
-  provision/       # Workspace provisioning (template materialize)
-templates/
-  base/            # Built-in workspace template (embedded into the binary)
-docs/
-  designs/         # Architecture design documents (D01–D09)
-  requirements/    # Requirement specifications (R01–R13)
-  changes/         # Change proposals (CH-00x)
-  tests/           # Unit test planning
-```
+GoGents is a personal tool, developed in the open as a reference. It is not accepting external pull requests, but you are welcome to fork it and take it in your own direction. Development conventions, the module map, and architecture live in [AGENTS.md](AGENTS.md).
 
 ## License
 

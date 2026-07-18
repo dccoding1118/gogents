@@ -1,16 +1,51 @@
 # GoGents 專案開發指南 (AGENTS.md)
 
-這是一份為開發者與 AI Agent 準備的專案指引文件，旨在協助快速了解專案結構、任務執行流程以及開發環境配置。
+這是一份為開發者與 AI Agent 準備的專案指引文件，旨在協助快速了解專案結構、任務執行流程以及開發環境配置。使用者面的簡介、安裝與操作見 [README.md](README.md)。
 
 ## 1. 專案概覽 (Project Overview)
-`gogents` 是一個基於 Go 語言開發的自動化系統，其核心工作流為：
+
+`gogents` 是一個基於 Go 語言開發的自動化 daemon，可獨立運作。其核心工作流為：
+
 1. **Sync**: 從外部 Task Source 同步指派任務。來源型別由 `source.type` 決定：`github_issue` (GitHub Issue) 或 `local` (本地 ticket inbox，預設 `<GOGENTS_HOME>/tickets/`)。
 2. **Execute**: 根據任務定義，呼叫 LLM Agent (Claude Code) 在本地工作區執行任務 (agent 工作目錄為 workspace 根，使 workspace 級 `.claude/`、`.mcp.json` 生效)。
 3. **Verify & Report**: 執行完成後，依 ticket 宣告的 `verify` (或 fallback `result.json`) 判定成敗，將結果與日誌回傳至來源 (GitHub 留言 / 回寫 ticket 檔)。
 
 workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/runtime.yaml` 與 `.claude/`、`.mcp.json` 等 agent runtime 元素），產出後即可 `gogents start`。template 來源預設為內建（embed），可經 `--template <path|name>` 與 `GOGENTS_TEMPLATES` 指定外部樹。
 
-作為 agent-manager (am) 的執行面：am 派工到自身 ticket inbox 並以絕對路徑寫入 worker 的 `source.path`，gogents worker daemon 依 label 認領執行、回寫終態；am 經 `gogents runtime status` / `gogents logs` 查詢執行狀態 (單向 `am → gogents`)。
+`local` 任務源的 ticket 由 **producer** 依 R11 契約寫入 inbox；gogents 不限定 producer 身分。[agent-manager (am)](https://github.com/dccoding1118/agent-manager) 是其中一種 producer：派工到自身 ticket inbox 並以絕對路徑寫入 worker 的 `source.path`，gogents worker daemon 依 label 認領執行、回寫終態；am 另經 `gogents runtime status` / `gogents logs`（`--json`）查詢執行狀態 (單向 `am → gogents`)。
+
+### 架構總覽
+
+兩種 task source 匯入同一條管線，結果回報至來源：
+
+```
+┌──────────────────┐
+│  GitHub Issues   │──┐
+└──────────────────┘  │
+                      │   ┌──────────┐     ┌──────────────┐     ┌───────────┐
+                      ├──▶│  Syncer  │────▶│  Task Store  │────▶│  Runner   │
+                      │   │  (D02)   │     │  (D01)       │     │  (D03)    │
+┌──────────────────┐  │   └──────────┘     └──────────────┘     └─────┬─────┘
+│  Local Tickets   │──┘                                               │
+│ (ticket inbox)   │                                           ┌──────▼──────┐
+└──────────────────┘                                           │  Agent CLI  │
+         ▲                                                     │   claude    │
+         │                                                     └──────┬──────┘
+         └───────────────── feedback (results) ────────────────────┘
+```
+
+| Package | 職責 | 設計文件 |
+| --- | --- | --- |
+| `internal/foundation` | Config、全域家目錄根、workspace 路徑、task store | D01 |
+| `internal/daemon` | Daemon 生命週期、sync loop、`runtime_state` 持久化 | D02 |
+| `internal/execution` | Task runner、result judge、input builder | D03 |
+| `internal/logger` | 結構化 JSONL logger | D04 |
+| `internal/source` | Task sources (`github_issue`／`local`)、feedback reporters、content fetchers、dispatcher | D05, D07 |
+| `internal/agent` | Claude probe／executor 適配器、dispatcher | D06 |
+| `internal/cli` | 命令層與 `start` 組裝、runtime 觀測 CLI | D08 |
+| `internal/provision` | workspace 佈建（`runtime create` 的 template 解析與 materialize） | D09 |
+| `internal/gitops` | Git 操作封裝 | — |
+| `internal/version` | binary 身分解析（`version` 指令） | CH-011 |
 
 ## 2. 目錄結構與導覽 (Directory Structure)
 
@@ -20,7 +55,8 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
 - `templates/base/`: 內建 workspace template，以 `go:embed` 打包進 binary；repo 內保留原始檔供複製修改。`templates/` 是收納目錄、`base/` 才是樹根（embed 亦 `fs.Sub` 到 `base/`），外部樹同構——`$GOGENTS_TEMPLATES` 對應收納目錄那層。
 - `bin/`: 編譯後的執行檔輸出目錄。
 - `logs/`: 測試報告、覆蓋率與執行日誌輸出目錄。
-- `.github/workflows/release.yml`: 發佈流程。推 `v*` tag 觸發，單一 linux runner 交叉編譯 linux/darwin × amd64/arm64，打包 binary + `templates/`（排除 `*.go`）+ `LICENSE` + `README.md`，經 `gh` 發佈至 GitHub Releases。規格見 CH-010。
+- `.github/workflows/ci.yml`: PR／push 持續整合（lint、test、govulncheck），見 §5。
+- `.github/workflows/release.yml`: 發佈流程，見 §6。
 
 ### 內部模組 (`internal/`)
 - `internal/foundation/`: 底層基礎建設。
@@ -49,13 +85,14 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
 - `internal/version/`: binary 身分解析 (`version` 指令)。ldflags `-X` 注入值優先，未注入時退回 `debug.ReadBuildInfo()` 的 `Main.Version` 與 `vcs.*` 戳記，全無則為 `dev` / `unknown`。規格見 CH-011。
 
 ### 文檔資源 (`docs/`)
-- `docs/designs/`: 詳細架構設計文件 (D01-D09)。開發前務必閱讀對應模組的設計。
-- `docs/requirements/`: 需求規格文件 (R01-R13)。
-- `docs/changes/`: 變更提案 (CH-00x)，描述跨模組的功能變更範圍。
+- `docs/requirements/`: 需求規格。總覽 `requirement.md`（目標、範圍、需求索引、關鍵檔案索引、術語表），逐項 `reqs/R01–R13`。
+- `docs/designs/`: 詳細架構設計 (`design-plan.md` 總覽 + `D01–D09`)。開發前務必閱讀對應模組的設計。
+- `docs/tests/`: 測試規劃 (`unit-tests.md`)。
+- `docs/changes/`: 變更提案 (`change-*.md`)，描述跨模組的功能變更範圍。
 
 ## 3. 環境設定與指令 (Environment & Mise)
 
-本專案使用 [mise](https://mise.jdx.st/) 管理工具鏈 (Go, Linter) 與常見開發任務。
+本專案使用 [mise](https://mise.jdx.dev/) 管理工具鏈 (Go, Linter) 與常見開發任務。
 
 ### mise Tasks
 以下為專案常用指令 (可透過 `mise run <task>` 執行)：
@@ -63,7 +100,7 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
 | 指令    | 功用                              | 核心路徑       |
 | :------ | :-------------------------------- | :------------- |
 | `build` | 編譯產出 `bin/gogents`            | `cmd/gogents/` |
-| `test`  | 執行所有單元測試                  | `./...`        |
+| `test`  | 執行所有單元測試並產出覆蓋率報告  | `./...`        |
 | `lint`  | 執行 `golangci-lint` 檢查代碼品質 | -              |
 | `fmt`   | 使用 `gofumpt` 強制格式化代碼     | -              |
 
@@ -82,12 +119,20 @@ workspace 由 `gogents runtime create <name>` 依 template 佈建（`.gogents/ru
 - **任務執行邏輯有誤 (Execution)**: 查看 `internal/execution/runner.go`。
 - **我要新增一種任務來源 (如 local)**: 於 `internal/source/` 新增 concrete strategy，並在 `internal/source/dispatcher.go` 的各 factory `switch` 加 case。
 - **我要調整驗證方式 (verify / result.json)**: 修改 `internal/execution/judge.go`。
-- **我要調整 runtime 註冊或觀測 CLI**: 註冊寫入見 `internal/foundation/config.go` 與 daemon `start`；查詢指令見 `cmd/gogents/`；`runtime_state` 見 `internal/daemon/state_store.go`。
+- **我要調整 runtime 註冊或觀測 CLI**: 註冊寫入見 `internal/foundation/config.go` 與 daemon `start`；查詢指令見 `internal/cli/`；`runtime_state` 見 `internal/daemon/state_store.go`。
 
 ## 5. 測試與品質規範 (Testing & Quality)
-- **單元測試**: 所有核心邏輯必須撰寫單元測試，且 **涵蓋率 (Coverage) 至少需達到 80%**。
-- **報告產出**: 單元測試結果應輸出至 `logs/unit_test_report.log`，不得直接輸出於根目錄。
-- **Linting**: 提交代碼前務必通過 `mise run lint`。
+
+- **單元測試**: 所有核心邏輯必須撰寫單元測試，且 **涵蓋率 (Coverage) 至少需達到 80%**。以 `mise run test` 執行，報告輸出至 `logs/unit_test_report.log`（不得直接輸出於根目錄），覆蓋率剖面至 `logs/coverage.out`。案例規劃見 `docs/tests/unit-tests.md`。
+- **Linting**: 提交代碼前務必通過 `mise run lint`（`golangci-lint`，設定 `.golangci.yaml` 為 v2 schema）。
+- **持續整合 (CI)**: `.github/workflows/ci.yml` 於 push 到 `main` 與所有 PR 觸發，三個 job 並行——`lint`（golangci-lint）、`test`（`go test -race -cover ./...`）、`vuln`（`govulncheck`，於較新 toolchain 上跑以取得最新 stdlib 修補）。
+- **端到端 (e2e) 驗證**: 目前無自動化 e2e 套件；完整流程（佈建 → start → 同步 → 執行 → 回報）以 dogfood 手動驗證。新增跨模組行為時，於 `docs/tests/` 補對應案例，並在該模組單元測試涵蓋其邊界。
+
+## 6. 發佈與部署 (Release & Deploy)
+
+- **發佈管道**: `.github/workflows/release.yml`，推 `v*` tag 觸發。單一 linux runner 交叉編譯 `linux/darwin × amd64/arm64`，打包 `binary + templates/`（排除 `*.go`）`+ LICENSE + README.md`，計算 `checksums.txt`，經 `gh` 發佈至 GitHub Releases。規格見 `docs/changes/change-release-pipeline.md`（CH-010）。
+- **版本注入**: 建置期以 `-ldflags -X` 注入 tag／commit／build time 至 `internal/version`（符號路徑與變數名綁定，改名須兩處同步）。從原始碼建置的 binary 退回 `dev` + `vcs.*` 戳記。規格見 CH-011。
+- **平台限制**: 不支援 Windows——daemon 的 pid 探活依賴 POSIX signal（`syscall.Kill`），於 Windows 編譯即失敗，故平台矩陣不含 Windows。
 
 ---
 *註：本文件應隨著專案演進持續更新。*
