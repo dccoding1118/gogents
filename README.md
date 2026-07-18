@@ -1,5 +1,12 @@
 # GoGents
 
+[![CI](https://github.com/dccoding1118/gogents/actions/workflows/ci.yml/badge.svg)](https://github.com/dccoding1118/gogents/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/dccoding1118/gogents/actions/workflows/codeql.yml/badge.svg)](https://github.com/dccoding1118/gogents/actions/workflows/codeql.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/dccoding1118/gogents)](https://goreportcard.com/report/github.com/dccoding1118/gogents)
+[![Go Reference](https://pkg.go.dev/badge/github.com/dccoding1118/gogents.svg)](https://pkg.go.dev/github.com/dccoding1118/gogents)
+[![Latest release](https://img.shields.io/github/v/release/dccoding1118/gogents)](https://github.com/dccoding1118/gogents/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **GoGents** is an automation daemon, written in Go, that works a queue of coding tasks unattended. It continuously pulls assigned tasks from a configured source, runs an LLM coding agent ([Claude Code](https://docs.anthropic.com/en/docs/claude-code)) against them inside a prepared workspace, verifies the outcome, and reports back to wherever the task came from.
 
 It runs standalone on your own machine: point it at a Git repository and a task source, start the daemon, and it syncs → executes → verifies → reports on a loop until you stop it.

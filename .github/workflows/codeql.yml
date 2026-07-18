@@ -1,0 +1,38 @@
+name: codeql
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# A newer push to the same ref supersedes in-flight runs.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+
+      # A manual build beats autobuild: it is explicit and fails loudly if the
+      # tree does not compile, instead of silently analyzing a partial graph.
+      - run: go build ./...
+
+      - uses: github/codeql-action/analyze@v3
