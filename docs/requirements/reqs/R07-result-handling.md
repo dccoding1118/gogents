@@ -36,7 +36,7 @@ coding 階段成敗的判定有兩條路徑,擇一:
 
 ### 路徑 A:ticket 宣告 `verify`(僅 `source.type: local`)
 
-am 的 ticket 可宣告驗證指令:
+ticket 可宣告驗證指令:
 
 ```yaml
 verify:

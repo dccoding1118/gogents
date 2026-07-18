@@ -2,7 +2,7 @@
 
 ## 目標
 
-建立一個本機常駐 daemon,從設定的任務來源接收開發任務,在預先配置好的 workspace 內呼叫本機 coding agent CLI 執行,並將執行結果回報到任務來源。任務來源支援 GitHub Issue(`github_issue`)與本地 ticket inbox(`local`,對接 agent-manager)。
+建立一個本機常駐 daemon,從設定的任務來源接收開發任務,在預先配置好的 workspace 內呼叫本機 coding agent CLI 執行,並將執行結果回報到任務來源。任務來源支援 GitHub Issue(`github_issue`)與本地 ticket inbox(`local`,任何 producer 皆可寫入)。
 
 ## 核心假設與範圍
 

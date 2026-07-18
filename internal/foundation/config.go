@@ -20,7 +20,7 @@ var (
 // GlobalConfig represents ~/.gogents/config.yaml — the runtime registry
 // maintained by `gogents start`. It is keyed by workspace path and consumed by
 // the observability CLI (`gogents runtime list/status`, `gogents logs`) and by
-// agent-manager to locate each worker.
+// external consumers to locate each runtime.
 type GlobalConfig struct {
 	Runtimes []RuntimeRegistration `yaml:"runtimes"`
 }

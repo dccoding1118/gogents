@@ -122,7 +122,7 @@ graph LR
 
 **GlobalConfig（`~/.gogents/config.yaml`）**
 
-全域 runtime 註冊表；由 D08（`gogents start`）於啟動時 upsert 寫入、由 D08（`gogents runtime remove`）反註冊移除，供觀測 CLI 與 am 定位 runtime。**不含 `active_runtime` 欄位**。
+全域 runtime 註冊表；由 D08（`gogents start`）於啟動時 upsert 寫入、由 D08（`gogents runtime remove`）反註冊移除，供觀測 CLI 與外部消費者定位 runtime。**不含 `active_runtime` 欄位**。
 
 | 欄位                        | 型別                    | 說明                                    |
 | --------------------------- | ----------------------- | --------------------------------------- |

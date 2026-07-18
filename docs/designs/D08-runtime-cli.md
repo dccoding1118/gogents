@@ -2,7 +2,7 @@
 
 涵蓋需求：R12（Runtime 註冊與觀測）、R13（Workspace 佈建的命令面）。
 
-本模組提供 `gogents` 的 runtime 命令介面：`gogents runtime create` 由 template 佈建出一個可直接 `start` 的 workspace,template 來源預設為內建、可經 `--template` 指定（來源解析與 materialize 皆由 D09 執行）；`gogents start` 於啟動時將 runtime 註冊寫入 config.yaml（位於全域家目錄根,預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫,見 D01 §3;以 workspace 路徑為 key）；`gogents runtime list` / `gogents runtime status` / `gogents logs` 供使用者與 agent-manager (am) 列出、查詢、匯出 runtime 狀態與日誌；`gogents runtime remove` 供 am 從註冊表反註冊退役／測試 runtime,取代手改 config.yaml。am 不維護執行狀態副本,一律經此介面查詢（單向 `am → gogents`）。
+本模組提供 `gogents` 的 runtime 命令介面：`gogents runtime create` 由 template 佈建出一個可直接 `start` 的 workspace,template 來源預設為內建、可經 `--template` 指定（來源解析與 materialize 皆由 D09 執行）；`gogents start` 於啟動時將 runtime 註冊寫入 config.yaml（位於全域家目錄根,預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫,見 D01 §3;以 workspace 路徑為 key）；`gogents runtime list` / `gogents runtime status` / `gogents logs` 供使用者與外部消費者列出、查詢、匯出 runtime 狀態與日誌；`gogents runtime remove` 供消費者從註冊表反註冊退役／測試 runtime,取代手改 config.yaml。消費者不維護執行狀態副本,一律經此介面查詢（單向 `consumer → gogents`）;agent-manager (am) 為此類消費者的其中一種。
 
 ## 1. 模組架構與周邊模組關聯
 
@@ -16,7 +16,7 @@ runtime-cli 是**唯讀觀測層 + 註冊表寫入點 + 佈建命令面**。註�
   - **D04 logger**：`gogents start` 已開 logger;查詢與 `create` 子指令為短命 CLI,直接輸出 stdout,不寫 daemon 日誌。
   - **D09 provision**：`Resolve` / `Inspect` / `Plan` / `Materialize`（`runtime create` 的 template 來源解析、目標狀態判定與 materialize）。
   - **OS**：pid 存活檢核（`kill(pid, 0)` 或讀 `/proc/<pid>`）;stdin 是否為終端（`runtime create` 的確認提示）。
-- **被依賴**：CLI 入口 `cmd/gogents`;am 以子行程呼叫本模組的三個查詢子指令。
+- **被依賴**：CLI 入口 `cmd/gogents`;外部消費者以子行程呼叫本模組的三個查詢子指令（例如 am）。
 - **I/O 邊界**：讀 `~/.gogents/config.yaml`、`<workspace>/.gogents/state.yaml`、`~/.gogents/logs/<hash>/*.jsonl`;寫 `~/.gogents/config.yaml`（`start` 的 upsert 與 `runtime remove` 的移除）;`runtime create` 經 D09 寫目標 workspace。（全域家目錄根預設 `~/.gogents`,可經 `GOGENTS_HOME` 覆寫。）
 
 ```mermaid
@@ -49,7 +49,7 @@ graph LR
 - **B1 register（由 `start` 呼叫）**：`start` 啟動時（D02 §5.1）以 `GlobalConfigStore.Upsert({name, workspace, registered_at=now})` 寫入 config.yaml,**以 `workspace` 路徑為主鍵**:已存在則覆蓋 `name` / `registered_at`,否則新增。寫入失敗僅記 warning `config.register_failed`、不中止啟動。config.yaml **不含 `active_runtime`**。
 - **B2 runtime list**：`Load` config.yaml,列出所有 `runtimes`（`workspace` / `name` / `registered_at`）;不檢核 pid、不讀 state.yaml。config.yaml 不存在 → 輸出空列表 + exit 0。
 - **B3 runtime status <workspace|name>**：以參數 `Resolve` 出 workspace → 讀該 workspace 的 `state.yaml` → 輸出 `runtime_state` / `pid` / `current_task` / `last_sync`。**查詢時檢核 pid**:`daemon.pid` 不存活 → 輸出 `runtime_state: down`（覆蓋 state.yaml 殘留值）。找不到註冊或 state.yaml → exit ≠ 0 + 明確訊息。
-- **B4 logs <workspace|name>**：`Resolve` → 推 `~/.gogents/logs/<hash>/` → 輸出 `daemon.jsonl`（預設）;供 am `audit export` 併入。找不到 → exit ≠ 0。
+- **B4 logs <workspace|name>**：`Resolve` → 推 `~/.gogents/logs/<hash>/` → 輸出 `daemon.jsonl`（預設）;供消費者稽核匯出併入（例如 am `audit export`）。找不到 → exit ≠ 0。
 - **B5 name 反查規則**：參數可為 workspace 絕對路徑或 runtime name。以 name 指定且多筆同 name（不同 workspace）→ 取 `registered_at` 最近者;以 workspace 路徑指定則精確匹配（主鍵）。remove 的目標解析同此規則。
 - **B6 唯讀不變量**：`list` / `status` / `logs` **不寫任何檔案**、不改 daemon 行為、不觸碰 task.yaml / state.yaml。config.yaml 的寫入僅來自 `start` 的 register 與 `runtime remove` 的反註冊。
 - **B7 runtime remove <workspace|name>**：以 B5 規則 `Resolve` 出目標,呼叫 `GlobalConfigStore.Remove` 自 config.yaml 的 `runtimes[]` 移除該筆並原子寫回;其餘條目不動。**只動註冊表**:不觸碰該 runtime 的 `logs/`、workspace 內 `.gogents/`,不停止其 daemon。找不到目標 → exit ≠ 0 + `runtime_not_found`。
@@ -82,17 +82,17 @@ graph LR
 | `last_sync_at`  | state.yaml `sync.last_sync_at`        | —                                    |
 | `last_sync_status` | state.yaml `sync.last_sync_status` | success / failed                     |
 
-輸出格式：預設人類可讀表列;`--json` 供 am 程式化解析（穩定資料契約,見 §3.4）。
+輸出格式：預設人類可讀表列;`--json` 供消費者程式化解析（穩定資料契約,見 §3.4）。
 
 ### 3.4 `--json` 資料契約
 
-`--json` 提供**穩定的機器可讀契約**,讓 am 轉接器不必逐行解析顯示層。未帶 `--json` 時所有文字輸出與 exit 行為完全不變（向後相容）。
+`--json` 提供**穩定的機器可讀契約**,讓消費者的轉接器不必逐行解析顯示層。未帶 `--json` 時所有文字輸出與 exit 行為完全不變（向後相容）。
 
 **`runtime list --json`** — stdout 輸出 JSON 陣列、exit 0;無註冊時輸出 `[]`（**非**文字 `(no registered runtimes)`）。每筆對應 `RuntimeView`:
 
 ```json
 [
-  {"name": "coding", "workspace": "/home/u/.am/workers/coding", "registered_at": "2026-07-04T12:00:00+08:00"}
+  {"name": "coding", "workspace": "/home/u/work/coding", "registered_at": "2026-07-04T12:00:00+08:00"}
 ]
 ```
 
@@ -101,7 +101,7 @@ graph LR
 ```json
 {
   "name": "coding",
-  "workspace": "/home/u/.am/workers/coding",
+  "workspace": "/home/u/work/coding",
   "registered_at": "2026-07-04T12:00:00+08:00",
   "runtime_state": "idle",
   "pid": 12345,

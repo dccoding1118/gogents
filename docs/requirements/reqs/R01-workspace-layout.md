@@ -54,7 +54,7 @@
 2. 否則 → `$HOME/.gogents`（預設，向後相容）。
 3. `$HOME` 亦無法解析時 → `/tmp` fallback。
 
-`GOGENTS_HOME` 讓同一台機器可各持獨立的全域註冊表與日誌（例如 dev 綁 sandbox、prod 綁營運目錄互不污染），與 agent-manager (am) 的 `AM_HOME` 對稱。
+`GOGENTS_HOME` 讓同一台機器可各持獨立的全域註冊表與日誌（例如 dev 綁 sandbox、prod 綁營運目錄互不污染）。
 
 **per-workspace 的 `.gogents/`**（`runtime.yaml` / `state.yaml` / `tasks/`）位於 workspace 目錄之下、屬相對路徑，**不受 `GOGENTS_HOME` 影響**，不隨全域家目錄根移動。
 

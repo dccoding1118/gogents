@@ -60,7 +60,7 @@ func TestLocalSource_List(t *testing.T) {
 	})
 }
 
-// TestLocalSource_ListStatusGate covers the am dispatch gate: only status ==
+// TestLocalSource_ListStatusGate covers the producer dispatch gate: only status ==
 // queued tickets are claimed; blocked / terminal / missing states are skipped.
 func TestLocalSource_ListStatusGate(t *testing.T) {
 	dir := t.TempDir()
@@ -223,7 +223,7 @@ func TestLocalVerifier(t *testing.T) {
 
 func TestLocalReporter_WriteBack(t *testing.T) {
 	dir := t.TempDir()
-	// Ticket carries governance fields am owns; they must survive write-back.
+	// Ticket carries producer-owned governance fields; they must survive write-back.
 	writeTicket(t, dir, "t-1.yaml", "id: t-1\nworker: backend\ngoal: g\nmission: m-42\ndepends_on:\n  - t-0\nstatus: running\n")
 	r := newLocalTicketReporter(localCfg(dir, "backend"), &mockTestLogger{})
 

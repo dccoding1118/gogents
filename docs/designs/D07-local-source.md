@@ -127,13 +127,13 @@ List(ctx, filter):
      t, err := parseTicket(e)
      if err != nil: emit "source.ticket_parse_failed" {path, reason}; continue
      if t.Worker != filter.Labels[0]: continue          // 先依 label 認領
-     if t.Status != "queued": continue                  // 再依 am dispatch 閘門(僅 queued)
+     if t.Status != "queued": continue                  // 再依 producer dispatch 閘門(僅 queued)
      out += mapToSourceTask(t)
   return out, nil
 
 Get(ctx, taskID):
   p := cfg.Source.Path + "/" + taskID + ".yaml"
-  if !exists(p): return SourceTask{}, ErrSourceNotFound  // am 刪除 ticket
+  if !exists(p): return SourceTask{}, ErrSourceNotFound  // producer 刪除 ticket
   t, err := parseTicket(p)
   if err != nil: return SourceTask{}, ErrSourceTransient
   return mapToSourceTask(t), nil
