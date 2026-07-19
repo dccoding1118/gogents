@@ -41,7 +41,7 @@ Two source types feed the one pipeline; a runtime picks one via `source.type`.
 - **`github_issue`** — polls GitHub Issues (via the `gh` CLI) by label. Feedback goes back as issue comments, PR links, and `gogents:*` labels.
 - **`local`** — reads a ticket inbox on disk (`<GOGENTS_HOME>/tickets/` by default), claiming tickets that match the worker label **and** carry `status: queued`. On completion it writes the terminal `status` and `result` back to the ticket file.
 
-Any tool that writes the ticket format is a **producer** — GoGents does not care which one. [agent-manager](https://github.com/dccoding1118/agent-manager) is one such producer: it queues tickets into an inbox, points a worker's `source.path` at it, and later reads live execution state via `gogents runtime status` / `gogents logs` (see [Managing Runtimes](#managing-runtimes)).
+Any tool that writes [the ticket format](#ticket-format-local-source) is a **producer** — GoGents does not care which one. [agent-manager](https://github.com/dccoding1118/agent-manager) is one such producer: it queues tickets into an inbox, points a worker's `source.path` at it, and later reads live execution state via `gogents runtime status` / `gogents logs` (see [Managing Runtimes](#managing-runtimes)).
 
 ## Features
 
@@ -246,6 +246,35 @@ agent:
   type: "claude"
   model: "claude-sonnet-5"
 ```
+
+### Ticket format (local source)
+
+The `runtime.yaml` above configures the worker that *consumes* tickets. The tickets themselves are written by a **producer** as `<source.path>/<id>.yaml`. GoGents owns this contract; any tool that emits this shape is a valid producer (a GitHub Issue source needs no such file — the issue *is* the ticket).
+
+```yaml
+# <inbox>/<id>.yaml — written by a producer
+id: "task-1"              # becomes the task id
+worker: "backend-worker"  # must equal the runtime's source.filter.label
+goal: "One-line task title"
+context: |
+  The full task description handed to the agent as input.
+verify:                   # optional; omit to fall back to the agent's own verdict
+  cmd: "pytest tests/"    # run in the workspace after the agent finishes; exit 0 = pass
+status: "queued"          # only 'queued' tickets are claimed
+```
+
+| Field | What GoGents does | Owner |
+| --- | --- | --- |
+| `id` | reads — becomes the task id | producer |
+| `worker` | reads — claimed only when it equals `source.filter.label` | producer |
+| `goal` / `context` | reads — assembled into the agent's `input.md` | producer |
+| `verify.cmd` | reads — run after the agent; its exit code decides pass/fail | producer |
+| `status` | reads to claim (`queued` only); writes the terminal `done` / `failed` | shared |
+| `result` | writes on completion — `{ type: code, pr_url, branch, commit }` or `{ type: artifacts, items: [...] }` | GoGents |
+| `updated_at` | writes on completion; also used for change detection | GoGents |
+| any other field | never read or written — preserved exactly as written | producer |
+
+GoGents only writes `status`, `result`, and `updated_at` back to the ticket; every other field (for example a producer's own governance fields) is left untouched. See [`docs/requirements/reqs/R11-local-source.md`](docs/requirements/reqs/R11-local-source.md) for the authoritative contract.
 
 ## Managing Runtimes
 
