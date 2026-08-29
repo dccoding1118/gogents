@@ -27,7 +27,7 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           languages: go
 
@@ -35,4 +35,4 @@ jobs:
       # tree does not compile, instead of silently analyzing a partial graph.
       - run: go build ./...
 
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
